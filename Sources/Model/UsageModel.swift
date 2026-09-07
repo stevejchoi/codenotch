@@ -115,6 +115,25 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// Set when something is blocked right now. Deliberately separate from the
     /// windows: it is not a measurement, it is a door being shut.
     var block: UsageBlock?
+    var kind: ProviderKind = .usage
+    var localRuntime: LocalRuntimeReading?
+    var localModel: LocalRuntimeReading.Model?
+    var localPerformance: LocalModelPerformance?
+    /// A model cell has its own identity, but polling and Settings belong to
+    /// the runtime that supplied it.
+    var sourceProviderID: String?
+
+    var providerID: String { sourceProviderID ?? id }
+
+    var notchSnapshots: [ProviderSnapshot] {
+        guard kind == .localRuntime, localModel == nil else { return [self] }
+        return (localRuntime?.models ?? []).sorted { $0.id < $1.id }.map { model in
+            ProviderSnapshot(id: "\(id):model:\(model.id)", displayName: displayName,
+                             glyph: model.brand?.glyph ?? glyph,
+                             fidelity: fidelity, status: status, windows: [],
+                             kind: kind, localModel: model, sourceProviderID: id)
+        }
+    }
 
     /// The number on the cell: the provider's declared primary window — for
     /// Claude, the current session.
@@ -136,6 +155,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
 
     /// What the cell prints under the ring.
     var headlineText: String {
+        if kind == .localRuntime { return localPerformance?.headlineText ?? "— tok/s" }
         if let usedFraction { return "\(Int((usedFraction * 100).rounded()))%" }
         if let remaining = headline?.remaining { return "\(remaining)" }
         if let used = headline?.used { return "\(used)" }
@@ -144,7 +164,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
 
     /// True when there is no reading to show — the cell draws an empty ring and
     /// a dash rather than an authoritative-looking 0%.
-    var hasReading: Bool { !windows.isEmpty }
+    var hasReading: Bool { localRuntime != nil || localModel != nil || !windows.isEmpty }
 
     /// A ring can only be drawn when the provider said what the limit was.
     var ringFraction: Double? { usedFraction }
@@ -169,6 +189,14 @@ struct ProviderSnapshot: Identifiable, Equatable {
 
     /// What the tooltip says instead of limit rows when there is nothing to show.
     var statusMessage: String? {
+        if kind == .localRuntime {
+            if localModel != nil { return nil }
+            if let localRuntime {
+                return localRuntime.models.isEmpty ? localRuntime.summary : nil
+            }
+            if case .error(let why) = status { return why }
+            return "Connecting to \(displayName)…"
+        }
         if hasReading { return nil }
         switch status {
         case .needsAuth:      return authPrompt

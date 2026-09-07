@@ -19,8 +19,7 @@ struct NotchRootView: View {
                 // Outside the notch and outside its clip: the orb hangs past
                 // the end of the shape, tucked into the corner the far flare
                 // makes.
-                if !model.snapshots.isEmpty {
-                    SettingsOrb(isHovered: model.isHoveringSettings, edge: model.edge,
+                SettingsOrb(isHovered: model.isHoveringSettings, edge: model.edge,
                                     convex: model.orbHugsCorner,
                                     arcRadius: model.orbArcRadius,
                                     arcOffset: model.orbArcOffset)
@@ -34,13 +33,12 @@ struct NotchRootView: View {
                         // sees the arc leave by.
                         .opacity(model.isExpanded ? 1 : 0)
                         .animation(motion(orbMotion), value: model.isExpanded)
-                }
 
                 if let snapshot = model.hoveredSnapshot, let index = model.hoveredIndex,
                    model.isExpanded {
                     TooltipCard(
                         snapshot: snapshot,
-                        activity: model.activity(for: snapshot.id),
+                        activity: model.activity(for: snapshot),
                         now: model.now,
                         direction: model.edge.tooltipDirection,
                         sessionCap: model.sessionCap
@@ -104,8 +102,8 @@ struct NotchRootView: View {
         let stack = ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
             ProviderCell(
                 snapshot: snapshot,
-                activity: model.activity(for: snapshot.id),
-                isRefreshing: model.refreshing.contains(snapshot.id)
+                activity: model.activity(for: snapshot),
+                isRefreshing: model.refreshing.contains(snapshot.providerID)
             )
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to
@@ -126,13 +124,13 @@ struct NotchRootView: View {
 
         Group {
             if model.edge.isVertical {
-                VStack(spacing: NotchLayout.cellSpacing) { stack }
+                VStack(spacing: model.cellSpacing) { stack }
                     .padding(.top, leadIn)
                     // The contents keep the expanded layout while folding, so
                     // the stack does not reflow on its way out; the shape clips it.
                     .frame(width: NotchLayout.bodyDepth(for: model.edge))
             } else {
-                HStack(spacing: NotchLayout.cellSpacing) { stack }
+                HStack(spacing: model.cellSpacing) { stack }
                     .padding(.leading, leadIn)
                     .frame(height: NotchLayout.bodyDepth(for: model.edge))
             }
@@ -190,10 +188,11 @@ struct NotchRootView: View {
             ? NotchLayout.cardWidth
             : NotchLayout.cardHeight(
                 windowCount: snapshot.windows.count,
-                sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
+                sessionCount: snapshot.localModel == nil ? (model.activity(for: snapshot)?.sessions.count ?? 0) : 0,
                 sessionCap: model.sessionCap,
                 statusMessage: snapshot.statusMessage,
-                blockMessage: snapshot.block?.summary(now: model.now)
+                blockMessage: snapshot.block?.summary(now: model.now),
+                localModelName: snapshot.localModel?.name
             )
         return place.point(
             along: model.slack + model.ringCenter(index: index),

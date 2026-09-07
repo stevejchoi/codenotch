@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private var store: UsageStore?
     private var monitors: [String: any AgentActivityMonitor] = [:]
+    private var ollamaRelay: OllamaActivityRelay?
     private var preferences: Preferences?
     private var settings: SettingsWindowController?
     private var whatsNew: WhatsNewWindowController?
@@ -70,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let store = UsageStore(
                 providers: claudeProfiles.map { ClaudeOAuthProvider(profile: $0) }
                     + [CursorLocalProvider(), CodexLocalProvider(), AntigravityProvider(),
-                       GLMProvider()]
+                       GLMProvider(), OllamaProvider(endpoint: URL(string: preferences.ollamaEndpoint)!)]
                     + webProviders,
                 disconnected: preferences.disconnectedProviders
             )
@@ -85,6 +86,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let updater = Updater()
             self.updater = updater
 
+            let relay = OllamaActivityRelay()
+            self.ollamaRelay = relay
+            let relayPreferences = Publishers.CombineLatest3(
+                preferences.$ollamaThinkingRelayEnabled,
+                preferences.$disconnectedProviders,
+                preferences.$ollamaEndpoint)
+            let relayConfiguration = relayPreferences.map { values in
+                (enabled: values.0 && !values.1.contains("ollama"), endpoint: values.2)
+            }.eraseToAnyPublisher()
+            relayConfiguration
+                .removeDuplicates { $0.enabled == $1.enabled && $0.endpoint == $1.endpoint }
+                .receive(on: RunLoop.main)
+                .sink { [weak relay] configuration in
+                    relay?.configure(enabled: configuration.enabled, endpoint: configuration.endpoint)
+                }
+                .store(in: &cancellables)
+            relay.$thinkingModels
+                .receive(on: RunLoop.main)
+                .sink { [weak controller, weak store] models in
+                    let previous = Set(controller?.model.thinkingModels.keys.map { $0 } ?? [])
+                    controller?.model.thinkingModels = models
+                    if !Set(models.keys).subtracting(previous).isEmpty { store?.refresh(providerID: "ollama") }
+                }
+                .store(in: &cancellables)
+
+            relay.$performances
+                .receive(on: RunLoop.main)
+                .sink { [weak controller, weak store] measurements in
+                    controller?.model.updatePerformances(measurements)
+                    if !measurements.isEmpty { store?.refresh(providerID: "ollama") }
+                }
+                .store(in: &cancellables)
+
             let settings = SettingsWindowController(
                 preferences: preferences,
                 // A closure so the sheet re-reads accounts each time it comes
@@ -97,7 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 switchAccount: { [weak store] in
                     store?.openAccountSource(providerID: $0) ?? false
                 },
-                retry: { [weak store] in store?.reauthorize(providerID: $0) }
+                retry: { [weak store] in store?.reauthorize(providerID: $0) },
+                usageStore: store, ollamaRelay: relay
             )
             controller.onOpenSettings = { [weak settings] in settings?.show() }
             self.settings = settings
@@ -151,11 +186,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak store] in store?.disconnected = $0 }
                 .store(in: &cancellables)
 
+            preferences.$ollamaEndpoint
+                .receive(on: RunLoop.main)
+                .sink { [weak store] address in
+                    guard let endpoint = try? OllamaEndpoint.parse(address) else { return }
+                    store?.updateOllamaEndpoint(endpoint)
+                }
+                .store(in: &cancellables)
+
             store.$snapshots
                 .receive(on: RunLoop.main)
                 .sink { [weak controller] snapshots in
                     withAnimation(NotchMotion.unfold) {
-                        controller?.model.snapshots = snapshots
+                        controller?.model.updateSnapshots(snapshots)
                     }
                     controller?.model.now = Date()
                 }
@@ -230,11 +273,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// opening it from Applications or Spotlight reopens settings.
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows: Bool) -> Bool {
-        settings?.show()
+        openSettings()
         return true
     }
 
+    @MainActor func openSettings() { settings?.show() }
+
     func applicationWillTerminate(_ notification: Notification) {
+        ollamaRelay?.configure(enabled: false, endpoint: OllamaEndpoint.defaultAddress)
         store?.stop()
         monitors.values.forEach { $0.stop() }
         notchController?.stop()

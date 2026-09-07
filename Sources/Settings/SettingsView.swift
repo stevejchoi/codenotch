@@ -20,6 +20,8 @@ struct SettingsView: View {
     /// the whole remedy: asking again is what puts the prompt back on screen.
     let retry: (String) -> Void
     @ObservedObject var updater: Updater
+    var ollamaRelay: OllamaActivityRelay? = nil
+    var usageStore: UsageStore? = nil
 
     var body: some View {
         // One page of grouped sections rather than tabs. Tabs hid three
@@ -31,7 +33,7 @@ struct SettingsView: View {
         Form {
             Section("Integrations") {
                 if needsSetup { setupNote }
-                ForEach(accounts) {
+                ForEach(accounts.filter { $0.kind == .usage }) {
                     AccountRow(provider: $0, preferences: preferences,
                                signOut: signOut, signIn: signIn,
                                switchAccount: switchAccount, retry: retry)
@@ -47,6 +49,12 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let usageStore {
+                Section("Local models") {
+                    OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
+                }
             }
 
             // One section, because they are one question: what Codenotch
@@ -180,7 +188,8 @@ struct SettingsView: View {
     /// Nothing to read from anywhere. On a first launch that is the normal
     /// state, and it is the only moment the sheet has something to explain.
     private var needsSetup: Bool {
-        !accounts.isEmpty && accounts.allSatisfy { $0.account == nil }
+        let usageAccounts = accounts.filter { $0.kind == .usage }
+        return !usageAccounts.isEmpty && usageAccounts.allSatisfy { $0.account == nil }
     }
 
     /// Names the tools rather than saying "tools already signed in on this

@@ -16,6 +16,14 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(Array(disconnectedProviders), forKey: Keys.disconnected) }
     }
 
+    @Published var ollamaEndpoint: String {
+        didSet { defaults.set(ollamaEndpoint, forKey: Keys.ollamaEndpoint) }
+    }
+
+    @Published var ollamaThinkingRelayEnabled: Bool {
+        didSet { defaults.set(ollamaThinkingRelayEnabled, forKey: "ollamaThinkingRelayEnabled") }
+    }
+
     /// How much of itself the notch shows at rest.
     @Published var notchVisibility: NotchVisibility {
         didSet { defaults.set(notchVisibility.rawValue, forKey: Keys.visibility) }
@@ -55,6 +63,8 @@ final class Preferences: ObservableObject {
     private enum Keys {
         /// The old name. Kept so existing choices survive the rename.
         static let disconnected = "hiddenProviders"
+        static let ollamaEndpoint = "ollamaEndpoint"
+        static let introducedOllama = "introducedOllama"
         static let hasLaunched = "hasLaunchedBefore"
         static let visibility = "notchVisibility"
         static let presence = "appPresence"
@@ -98,7 +108,19 @@ final class Preferences: ObservableObject {
         self.defaults = defaults
         self.isFirstLaunch = !defaults.bool(forKey: Keys.hasLaunched)
         defaults.set(true, forKey: Keys.hasLaunched)
-        self.disconnectedProviders = Set(defaults.stringArray(forKey: Keys.disconnected) ?? [])
+        var disconnected = Set(defaults.stringArray(forKey: Keys.disconnected) ?? [])
+        // A new local integration should not begin probing a server merely
+        // because the app updated. Seed the opt-in once, then keep the choice.
+        if !defaults.bool(forKey: Keys.introducedOllama) {
+            disconnected.insert("ollama")
+            defaults.set(Array(disconnected), forKey: Keys.disconnected)
+            defaults.set(true, forKey: Keys.introducedOllama)
+        }
+        self.ollamaThinkingRelayEnabled = defaults.bool(forKey: "ollamaThinkingRelayEnabled")
+        self.disconnectedProviders = disconnected
+        self.ollamaEndpoint = (try? OllamaEndpoint.parse(
+            defaults.string(forKey: Keys.ollamaEndpoint) ?? OllamaEndpoint.defaultAddress
+        ).absoluteString) ?? OllamaEndpoint.defaultAddress
         // Absent means never chosen, which is the hover behaviour the app was
         // designed around — not hidden, which would make a fresh install look
         // like it failed to start.

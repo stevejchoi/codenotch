@@ -4,10 +4,32 @@ import Combine
 @MainActor
 final class NotchViewModel: ObservableObject {
     @Published var snapshots: [ProviderSnapshot] = []
+    private var performances: [String: LocalModelPerformance] = [:]
+
+    func updateSnapshots(_ providerSnapshots: [ProviderSnapshot]) {
+        let hoveredID = hoveredSnapshot?.id
+        let next = providerSnapshots.flatMap(\.notchSnapshots).map(withPerformance)
+        if snapshots.map(\.id) != next.map(\.id) { hoveredIndex = nil }
+        snapshots = next
+        if let hoveredID { hoveredIndex = next.firstIndex { $0.id == hoveredID } }
+    }
+
+    func updatePerformances(_ measurements: [String: LocalModelPerformance]) {
+        performances = measurements
+        snapshots = snapshots.map(withPerformance)
+    }
+
+    private func withPerformance(_ snapshot: ProviderSnapshot) -> ProviderSnapshot {
+        guard let model = snapshot.localModel else { return snapshot }
+        var snapshot = snapshot
+        snapshot.localPerformance = performances[OllamaThinkingStream.modelKey(model.name)]
+        return snapshot
+    }
     /// Live agent sessions, keyed by the provider they belong to. They surface
     /// inside that provider's own ring rather than as a cell of their own — one
     /// ring per provider, so nothing in the notch looks like a ring without
     /// being one.
+    @Published var thinkingModels: [String: Date] = [:]
     @Published var sessions: [String: [AgentSession]] = [:]
 
     /// Which cell the cursor is over, if any. Driven from the window controller
@@ -239,18 +261,43 @@ final class NotchViewModel: ObservableObject {
     /// The straight part of the shape, flares excluded.
     var bodyLength: CGFloat {
         NotchLayout.bodyLength(
-            cellCount: snapshots.count, edge: edge
+            cellCount: snapshots.count, edge: edge, spacing: cellSpacing
         ) + 2 * endSpread
     }
 
     /// Distance along the stack to cell `index`'s ring centre, widening
     /// included so the readings stay in the middle of the bar.
     func ringCenter(index: Int) -> CGFloat {
-        NotchLayout.ringCenter(index: index, edge: edge, flare: flare) + endSpread
+        NotchLayout.ringCenter(index: index, edge: edge, flare: flare,
+                              spacing: cellSpacing) + endSpread
+    }
+
+    var cellSpacing: CGFloat { cellSpacing(cellCount: snapshots.count) }
+    var cellPitch: CGFloat { NotchLayout.cellAlong(for: edge) + cellSpacing }
+
+    private func cellSpacing(cellCount: Int) -> CGFloat {
+        guard edge.isVertical, screenSize.height > 0, cellCount > 1 else {
+            return NotchLayout.cellSpacing
+        }
+        // Extra model cells first spend the gaps between rings. Keep room for
+        // the tallest quota card even after all session rows are summarised.
+        let slack = NotchLayout.slack(for: edge,
+            maxCardHeight: NotchLayout.maxCardHeight(sessionCap: 0))
+        let packed = NotchLayout.shapeLength(cellCount: cellCount, edge: edge,
+                                             flare: flare, spacing: 0)
+        return min(NotchLayout.cellSpacing,
+                   max(0, (screenSize.height - 2 * slack - packed) / CGFloat(cellCount - 1)))
     }
 
     /// A provider with no activity source gets none, rather than borrowing
     /// somebody else's.
+    func activity(for snapshot: ProviderSnapshot) -> ActivitySummary? {
+        guard let model = snapshot.localModel else { return activity(for: snapshot.providerID) }
+        guard let since = thinkingModels[OllamaThinkingStream.modelKey(model.name)] else { return nil }
+        return ActivitySummary(sessions: [AgentSession(id: snapshot.id, name: "Thinking",
+            detail: "Ollama", state: .busy, waitingFor: nil, since: since)])
+    }
+
     func activity(for providerID: String) -> ActivitySummary? {
         ActivitySummary(sessions: sessions[providerID] ?? [])
     }
@@ -351,7 +398,8 @@ final class NotchViewModel: ObservableObject {
     /// the panel is sized for the list that caused the change.
     func shapeLength(cellCount: Int) -> CGFloat {
         NotchLayout.shapeLength(cellCount: cellCount,
-                                edge: edge, flare: flare)
+                                edge: edge, flare: flare,
+                                spacing: cellSpacing(cellCount: cellCount))
             + 2 * endSpread(cellCount: cellCount)
     }
 

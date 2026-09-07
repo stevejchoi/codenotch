@@ -233,18 +233,20 @@ enum NotchLayout {
     /// follows it along the stack, across a horizontal one there is nothing
     /// else on the stack at all.
     static func ringCenter(index: Int, edge: NotchEdge = .right,
-                           flare: CGFloat = curlRadius) -> CGFloat {
+                           flare: CGFloat = curlRadius,
+                           spacing: CGFloat = cellSpacing) -> CGFloat {
         flare + padStart(for: edge) + ringDiameter / 2
-            + CGFloat(index) * cellPitch(for: edge)
+            + CGFloat(index) * (cellAlong(for: edge) + spacing)
     }
 
     /// Height of the notch body for a given number of provider cells.
-    static func bodyLength(cellCount: Int, edge: NotchEdge = .right) -> CGFloat {
+    static func bodyLength(cellCount: Int, edge: NotchEdge = .right,
+                           spacing: CGFloat = cellSpacing) -> CGFloat {
         let start = padStart(for: edge), end = padEnd(for: edge)
         guard cellCount > 0 else { return start + end }
         return start
             + CGFloat(cellCount) * cellAlong(for: edge)
-            + CGFloat(cellCount - 1) * cellSpacing
+            + CGFloat(cellCount - 1) * spacing
             + end
     }
 
@@ -264,8 +266,9 @@ enum NotchLayout {
     /// `curlRadius` there leaves some 56pt of dead black either side of the
     /// readings — which is exactly what made the top bar look too wide.
     static func shapeLength(cellCount: Int, edge: NotchEdge = .right,
-                            flare: CGFloat = curlRadius) -> CGFloat {
-        bodyLength(cellCount: cellCount, edge: edge) + 2 * flare
+                            flare: CGFloat = curlRadius,
+                            spacing: CGFloat = cellSpacing) -> CGFloat {
+        bodyLength(cellCount: cellCount, edge: edge, spacing: spacing) + 2 * flare
     }
 
     /// The tooltip's height for a given number of limit windows and live
@@ -274,7 +277,8 @@ enum NotchLayout {
     static func cardHeight(windowCount: Int, sessionCount: Int = 0,
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
-                           blockMessage: String? = nil) -> CGFloat {
+                           blockMessage: String? = nil,
+                           localModelName: String? = nil) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
 
@@ -284,7 +288,10 @@ enum NotchLayout {
             height += headerToBlock + bodyTextHeight(blockMessage)
         }
 
-        if windowCount > 0 {
+        if let localModelName {
+            height += headerToBlock + modelNameHeight(localModelName)
+                + blockSpacing + 5 * cardBodyLineHeight + 4 * sessionRowGap
+        } else if windowCount > 0 {
             let block = 2 * cardBodyLineHeight + labelToBar + barHeight + barToUsed
             height += headerToBlock
                 + CGFloat(windowCount) * block
@@ -306,6 +313,10 @@ enum NotchLayout {
             }
         }
         return height
+    }
+
+    static func modelNameHeight(_ name: String) -> CGFloat {
+        min(2 * cardBodyLineHeight, bodyTextHeight(name))
     }
 
 

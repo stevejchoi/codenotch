@@ -20,6 +20,7 @@ final class UsageStore: ObservableObject {
     @Published var disconnected: Set<String> = [] {
         didSet {
             guard disconnected != oldValue else { return }
+            for id in disconnected.subtracting(oldValue) { cancelRefresh(providerID: id) }
             snapshots.removeAll { disconnected.contains($0.id) }
             // The remembered reading has to go as well. Dropping it from
             // `snapshots` alone left it in `lastGood`, which is written to the
@@ -28,7 +29,15 @@ final class UsageStore: ObservableObject {
             // launch, ring and all.
             for id in disconnected { lastGood.removeValue(forKey: id) }
             archive.save(lastGood)
-            refreshNow()
+            for provider in providers where oldValue.contains(provider.id) && !disconnected.contains(provider.id) {
+                publish(Self.placeholder(provider))
+            }
+            let changed = disconnected.symmetricDifference(oldValue)
+            if providers.contains(where: { changed.contains($0.id) && $0.kind == .usage }) {
+                refreshNow()
+            } else {
+                refreshLocalRuntimes()
+            }
         }
     }
 
@@ -55,6 +64,9 @@ final class UsageStore: ObservableObject {
     private let archive: UsageArchive
     private var lastGood: [String: (snapshot: ProviderSnapshot, fetchedAt: Date)] = [:]
     private var timer: Timer?
+    private var localTimer: Timer?
+    private var fetchTasks: [String: Task<Void, Never>] = [:]
+    private var generations: [String: Int] = [:]
     private var refreshTask: Task<Void, Never>?
     /// Set synchronously before the task exists, so "is one already running"
     /// never depends on when the task body happens to start.
@@ -84,6 +96,9 @@ final class UsageStore: ObservableObject {
         // every remembered reading on any launch with a provider switched off.
         _disconnected = Published(initialValue: disconnected)
         lastGood = archive.load()
+        for provider in providers where provider.kind == .localRuntime {
+            lastGood.removeValue(forKey: provider.id)
+        }
         // Pruned here as well as in `didSet`, because `didSet` cannot be relied
         // on to run: it guards against a no-op change, and the value the
         // preference binding delivers a moment later is usually identical to
@@ -107,7 +122,7 @@ final class UsageStore: ObservableObject {
     /// Enough to list the providers in settings without exposing them.
     var providerSummaries: [ProviderSummary] {
         providers.map { provider in
-            ProviderSummary(id: provider.id, name: provider.displayName,
+            ProviderSummary(kind: provider.kind, id: provider.id, name: provider.displayName,
                             glyph: provider.glyph, account: provider.account(),
                             signIn: provider.signInRoute,
                             wasRefusedAccess: refusedAccess.contains(provider.id))
@@ -123,6 +138,12 @@ final class UsageStore: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
 
+        let localTimer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshLocalRuntimes() }
+        }
+        RunLoop.main.add(localTimer, forMode: .common)
+        self.localTimer = localTimer
+
         // Waking up is the one moment the numbers are guaranteed to be wrong.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
@@ -134,7 +155,10 @@ final class UsageStore: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        localTimer?.invalidate()
+        localTimer = nil
         refreshTask?.cancel()
+        for id in Array(fetchTasks.keys) { cancelRefresh(providerID: id) }
         isRefreshing = false
         // Block-based observers are not removed by `removeObserver(self)`.
         if let wakeObserver {
@@ -178,14 +202,10 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
-        let live = providers.filter { !disconnected.contains($0.id) }
-        refreshing = Set(live.map(\.id))
-        defer { refreshing = [] }
-        var next: [ProviderSnapshot] = []
-        for provider in live {
-            next.append(await snapshot(from: provider))
+        let tasks = providers.filter { !disconnected.contains($0.id) }.map {
+            beginRefresh($0)
         }
-        snapshots = next
+        for task in tasks { await task.value }
     }
 
     /// Refetch one provider, leaving the others alone.
@@ -197,20 +217,55 @@ final class UsageStore: ObservableObject {
         guard let provider = providers.first(where: { $0.id == providerID }),
               !disconnected.contains(providerID),
               !refreshing.contains(providerID) else { return }
+        if provider.kind == .usage { lastAttempt = Date() }
+        _ = beginRefresh(provider, holdIndicator: true)
+    }
 
-        refreshing.insert(providerID)
-        Task { [weak self] in
-            let fresh = await self?.snapshot(from: provider)
-            guard let self, let fresh else { return }
-            if let index = self.snapshots.firstIndex(where: { $0.id == providerID }) {
-                self.snapshots[index] = fresh
-            }
-            self.lastAttempt = Date()
-            // A beat of visible work even when the answer was instant: a spinner
-            // that flashes for one frame reads as a glitch, not as a refresh.
-            try? await Task.sleep(nanoseconds: 380_000_000)
-            self.refreshing.remove(providerID)
+    func refreshLocalRuntimes() {
+        for provider in providers where provider.kind == .localRuntime && !disconnected.contains(provider.id) {
+            _ = beginRefresh(provider)
         }
+    }
+
+    func updateOllamaEndpoint(_ endpoint: URL) {
+        guard let provider = providers.first(where: { $0.id == "ollama" }) as? OllamaProvider,
+              provider.endpoint != endpoint else { return }
+        cancelRefresh(providerID: provider.id)
+        provider.updateEndpoint(endpoint)
+        guard !disconnected.contains(provider.id) else { return }
+        publish(Self.placeholder(provider))
+        _ = beginRefresh(provider)
+    }
+
+    private func beginRefresh(_ provider: UsageProvider, holdIndicator: Bool = false) -> Task<Void, Never> {
+        if let task = fetchTasks[provider.id] { return task }
+        let generation = generations[provider.id, default: 0]
+        refreshing.insert(provider.id)
+        let task = Task { [weak self] in
+            guard let self else { return }
+            if let fresh = await snapshot(from: provider, generation: generation) {
+                publish(fresh)
+            }
+            if holdIndicator { try? await Task.sleep(nanoseconds: 380_000_000) }
+            guard generations[provider.id, default: 0] == generation else { return }
+            refreshing.remove(provider.id)
+            fetchTasks.removeValue(forKey: provider.id)
+        }
+        fetchTasks[provider.id] = task
+        return task
+    }
+
+    private func cancelRefresh(providerID: String) {
+        generations[providerID, default: 0] += 1
+        fetchTasks.removeValue(forKey: providerID)?.cancel()
+        refreshing.remove(providerID)
+    }
+
+    private func publish(_ snapshot: ProviderSnapshot) {
+        guard !disconnected.contains(snapshot.id) else { return }
+        var current = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
+        current[snapshot.id] = snapshot
+        snapshots = providers.compactMap { disconnected.contains($0.id) ? nil : current[$0.id] }
     }
 
     /// Sign out of one provider: discard anything of its account that this app
@@ -227,7 +282,7 @@ final class UsageStore: ObservableObject {
     /// did not ask us to touch. `SignInRoute.signOutCaveat` says so on the row.
     func signOut(providerID: String) {
         guard let provider = providers.first(where: { $0.id == providerID }) else { return }
-
+        cancelRefresh(providerID: providerID)
         snapshots.removeAll { $0.id == providerID }
         lastGood.removeValue(forKey: providerID)
         archive.forget(providerID)
@@ -297,18 +352,34 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    private func snapshot(from provider: UsageProvider) async -> ProviderSnapshot {
+    private func snapshot(from provider: UsageProvider, generation: Int) async -> ProviderSnapshot? {
         do {
             let fresh = try await provider.fetchSnapshot()
-            lastGood[provider.id] = (fresh, Date())
-            archive.save(lastGood)
+            guard acceptsResult(from: provider, generation: generation) else { return nil }
+            // Model residency becomes untrue as soon as a server stops. It must
+            // never use quota's last-good cache or survive an app relaunch.
+            if provider.kind == .usage {
+                lastGood[provider.id] = (fresh, Date())
+                archive.save(lastGood)
+            }
             refusedAccess.remove(provider.id)
             Log.usage.debug("\(provider.id, privacy: .public): \(fresh.windows.count) window(s)")
             return fresh
         } catch {
+            guard acceptsResult(from: provider, generation: generation) else { return nil }
             Log.usage.error("\(provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            if provider.kind == .localRuntime {
+                var empty = Self.placeholder(provider)
+                empty.status = .error(error.localizedDescription)
+                return empty
+            }
             return degraded(provider: provider, error: error)
         }
+    }
+
+    private func acceptsResult(from provider: UsageProvider, generation: Int) -> Bool {
+        !Task.isCancelled && !disconnected.contains(provider.id)
+            && generations[provider.id, default: 0] == generation
     }
 
     /// A failed fetch never invents a number: it either re-shows the last good
@@ -408,7 +479,8 @@ final class UsageStore: ObservableObject {
             glyph: provider.glyph,
             fidelity: .official,
             status: .stale(since: .distantPast),
-            windows: []
+            windows: [],
+            kind: provider.kind
         )
     }
 }

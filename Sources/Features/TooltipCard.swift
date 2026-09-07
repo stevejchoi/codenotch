@@ -269,6 +269,7 @@ private struct LimitWindowRow: View {
 }
 
 private struct ProviderTooltip: View {
+    var isThinking = false
     let snapshot: ProviderSnapshot
     let now: Date
 
@@ -283,7 +284,10 @@ private struct ProviderTooltip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TooltipHeader(title: "\(snapshot.displayName) Usage", note: readingAge) {
+            TooltipHeader(title: snapshot.kind == .localRuntime
+                          ? "\(snapshot.localModel?.brand?.displayName ?? snapshot.displayName) · Local"
+                          : "\(snapshot.displayName) Usage",
+                          note: isThinking ? "Thinking" : (snapshot.localModel?.brand != nil ? snapshot.displayName : readingAge)) {
                 ProviderGlyphView(glyph: snapshot.glyph)
                     .foregroundStyle(Palette.textPrimary)
             }
@@ -299,6 +303,8 @@ private struct ProviderTooltip: View {
                     .foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, NotchLayout.headerToBlock)
+            } else if let localModel = snapshot.localModel {
+                RuntimeModelDetails(model: localModel, performance: snapshot.localPerformance, now: now)
             } else {
                 ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
                     LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now)
@@ -306,6 +312,35 @@ private struct ProviderTooltip: View {
                 }
             }
         }
+    }
+}
+
+private struct RuntimeModelDetails: View {
+    let model: LocalRuntimeReading.Model
+    let performance: LocalModelPerformance?
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(model.name)
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .frame(height: NotchLayout.modelNameHeight(model.name), alignment: .topLeading)
+                .padding(.top, NotchLayout.headerToBlock)
+                .accessibilityLabel(model.name)
+            VStack(spacing: NotchLayout.sessionRowGap) {
+                SplitRow(leading: "Last speed", trailing: performance?.speedText ?? "Not measured",
+                         trailingColor: performance?.band.color ?? Palette.textSecondary)
+                SplitRow(leading: "Speed band", trailing: performance?.band.label ?? "—")
+                SplitRow(leading: "RAM", trailing: model.memoryBytes == nil ? "Unavailable" : model.memoryText)
+                SplitRow(leading: "Context limit", trailing: model.contextText)
+                SplitRow(leading: "Measured", trailing: performance.map { ElapsedCopy.ago(since: $0.measuredAt, now: now) } ?? "—")
+            }
+            .padding(.top, NotchLayout.blockSpacing)
+        }
+        .font(Typography.cardBody)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -439,10 +474,11 @@ struct TooltipCard: View {
     private var height: CGFloat {
         NotchLayout.cardHeight(
             windowCount: snapshot.windows.count,
-            sessionCount: activity?.sessions.count ?? 0,
+            sessionCount: snapshot.localModel == nil ? (activity?.sessions.count ?? 0) : 0,
             sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: now)
+            blockMessage: snapshot.block?.summary(now: now),
+            localModelName: snapshot.localModel?.name
         )
     }
 
@@ -454,8 +490,8 @@ struct TooltipCard: View {
             // drifts while the card resizes around them.
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ProviderTooltip(snapshot: snapshot, now: now)
-                    if let activity {
+                    ProviderTooltip(isThinking: snapshot.localModel != nil && activity?.state == .working, snapshot: snapshot, now: now)
+                    if let activity, snapshot.localModel == nil {
                         SessionList(summary: activity, now: now, cap: sessionCap)
                     }
                 }

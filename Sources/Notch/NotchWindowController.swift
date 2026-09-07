@@ -214,10 +214,11 @@ final class NotchWindowController {
         let snapshot = model.snapshots[index]
         let cardHeight = NotchLayout.cardHeight(
             windowCount: snapshot.windows.count,
-            sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
+            sessionCount: snapshot.localModel == nil ? (model.activity(for: snapshot)?.sessions.count ?? 0) : 0,
             sessionCap: model.sessionCap,
             statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: model.now)
+            blockMessage: snapshot.block?.summary(now: model.now),
+            localModelName: snapshot.localModel?.name
         )
         // Across the stack the region is the card, its tail, and the gap the
         // pointer has to cross. Along it, the card's own extent.
@@ -415,7 +416,7 @@ final class NotchWindowController {
         if notchRect.contains(local),
            let index = cellIndex(along: placement.along(of: local)),
            model.snapshots.indices.contains(index) {
-            onRefreshProvider?(model.snapshots[index].id)
+            onRefreshProvider?(model.snapshots[index].providerID)
             return
         }
         togglePinned()
@@ -539,8 +540,8 @@ final class NotchWindowController {
         updateInteractiveRects()
     }
 
-    private func cellIndex(along: CGFloat) -> Int? {
-        let pitch = NotchLayout.cellPitch(for: model.edge)
+    func cellIndex(along: CGFloat) -> Int? {
+        let pitch = model.cellPitch
         for index in model.snapshots.indices {
             let centre = model.slack + model.ringCenter(index: index)
             if abs(along - centre) <= pitch / 2 { return index }

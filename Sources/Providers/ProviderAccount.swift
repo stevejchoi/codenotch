@@ -108,6 +108,7 @@ extension UsageProvider {
 
 /// A provider as the settings sheet needs it.
 struct ProviderSummary: Identifiable, Equatable {
+    var kind: ProviderKind = .usage
     /// Whether this provider's credential lives in the keychain, and so can be
     /// refused. Cursor and Codex read ordinary files and never prompt, so
     /// offering them an "allow access" button would be offering a cure for an

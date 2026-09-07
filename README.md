@@ -19,12 +19,56 @@ two never disagree.
 | **Codex** | official | Codex's own app server, asked live for the current rate limits. Falls back to its rollout log when Codex isn't running. |
 | **Antigravity** | official where licensed, otherwise a request count | Antigravity's local language server first, then Google's quota endpoint; a plain count when neither will answer for the account. |
 | **GLM** | official | Z.ai's Coding Plan monitor endpoint, with a key borrowed from whichever coding tool already holds one — Claude Code's `settings.json`, ZCode, or OpenCode. |
+| **Ollama** | local runtime | Its local `/api/ps` listing: loaded models, reported model memory and context capacity. Enable it in Settings → Local models. |
 
-Codenotch never signs in anywhere. Every reading is borrowed from a credential
+Codenotch never signs in anywhere. Cloud usage is borrowed from a credential
 or session a tool on your Mac already holds — install and sign in to any of
 them, and its ring appears. Switching a provider off in Settings stops its
-credential being read at all and forgets the readings taken from it; it does
+usage polling and forgets the readings taken from it; it does
 not sign you out of the tool that owns the account, and the row says so.
+
+**Ollama monitoring is opt-in.** Turn it on under **Settings → Local models →
+Ollama**. It checks `http://127.0.0.1:11434` every 15 seconds; the address can be
+changed to another HTTP port on this Mac. Each loaded model gets its own
+cell showing its last measured generation speed, such as **30 tok/s**, or
+**— tok/s** until measured. Qwen, Gemma, Llama (Meta), DeepSeek
+and Mistral models get their brand icon automatically from the model name;
+unrecognized or custom names use the Ollama llama icon. Hover for the model name,
+last speed, speed band, measurement age, RAM and **Context limit** in tokens;
+this limit is not actual token consumption. A cell
+disappears when its model unloads. Connection status stays in Settings.
+There is no quota percentage, and a loaded model does not produce a working indicator. Switching
+monitoring off leaves Ollama running and removes the reading; model readings
+are not saved across launches. Monitoring never initiates inference.
+
+
+For speed measurements and a live **Thinking** indicator, enable
+**Track speed and thinking through local relay**
+in the same settings. Point your Ollama client at `http://127.0.0.1:11435` while
+Codenotch is open. The backend stays on `11434`. For example:
+
+```sh
+OLLAMA_HOST=http://127.0.0.1:11435 ollama run gemma4:e4b --think
+```
+
+The existing white arc spins only while that model emits streamed reasoning,
+and stops when answer text starts or the request ends/cancels. Native Ollama
+`/api/chat`, `/api/generate`, and OpenAI-compatible `/v1/chat/completions` streams
+are observed. Direct backend requests and non-streaming responses cannot show
+live thinking. Completed native `/api/chat` and `/api/generate` responses,
+streamed or not, update speed from `eval_count / (eval_duration / 1e9)`.
+This is the latest response's average generation speed, excluding model loading
+and prompt processing; OpenAI-compatible responses lack the required timing.
+The full outer ring is blue at ≥40 tok/s, green at 20–<40, yellow at 10–<20,
+red below 10, and gray before measurement. These are display thresholds, not a
+PC health rating. The white thinking arc remains independent of the speed color.
+
+The relay keeps active request/model identifiers and timestamps, plus the latest
+speed measurement per model (up to 128 models), only in memory. It does not save
+prompts, reasoning, or replies. It binds to loopback only and
+forwards requests to your configured local Ollama server (32 MiB request limit).
+Disabling monitoring or the relay closes its connections and clears activity
+and speed measurements. Changing the backend or relaunching also clears them.
 
 It also answers **"is it still working?"** — a thin arc spins inside a
 provider's ring while a session is busy, and becomes a pulsing amber ring when
