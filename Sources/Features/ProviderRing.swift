@@ -185,12 +185,13 @@ struct ProviderCell: View {
                 .font(Typography.percent)
                 .foregroundStyle(snapshot.localModel != nil && snapshot.localPerformance == nil
                                  ? Palette.textSecondary : Palette.textPrimary)
-                // Never squeezed: across a horizontal edge the cell is only as
-                // wide as the ring, and a label wider than that would be
-                // truncated rather than allowed to overhang into the spacing
-                // that is already there for it.
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(height: NotchLayout.percentLineHeight)
+                // Keep local speeds inside the ring's column so longer units
+                // cannot consume the notch's existing side margins.
+                .lineLimit(1)
+                .minimumScaleFactor(snapshot.localModel == nil ? 1 : 0.5)
+                .fixedSize(horizontal: snapshot.localModel == nil, vertical: false)
+                .frame(width: snapshot.localModel == nil ? nil : NotchLayout.ringDiameter,
+                       height: NotchLayout.percentLineHeight)
                 .contentTransition(.numericText())
                 .animation(NotchMotion.reading, value: readingText)
         }

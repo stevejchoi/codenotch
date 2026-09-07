@@ -109,13 +109,36 @@ final class OllamaPerformanceViewTests: XCTestCase {
     }
 
     func testSpeedLabelsFitTheExistingCellAndColorHasTextMeaning() throws {
-        let font = NSFont.systemFont(ofSize: Design.fontSize(capPixels: 27), weight: .semibold)
-        for (tokens, duration) in [(1, Int64(100_000_000_000)), (1, 1_000_000_000), (399, 10_000_000_000),
-                                   (999, 1_000_000_000), (1234, 1_000_000_000), (987654, 1_000_000_000)] {
-            let reading = try XCTUnwrap(LocalModelPerformance(outputTokens: tokens, durationNanoseconds: duration))
-            let width = (reading.headlineText as NSString).size(withAttributes: [.font: font]).width
-            XCTAssertLessThanOrEqual(width, NotchLayout.bodyDepth(for: .right), reading.headlineText)
-            XCTAssertFalse(reading.band.label.isEmpty)
+        let cases: [(Int, Int64)] = [(1, 100_000_000_000), (1, 1_000_000_000),
+            (102, 10_000_000_000), (999, 10_000_000_000), (241, 1_000_000_000),
+            (999, 1_000_000_000), (1234, 1_000_000_000), (987654, 1_000_000_000), (Int.max, 1)]
+        var readings: [LocalModelPerformance?] = [nil]
+        readings += try cases.map { tokens, duration in
+            try XCTUnwrap(LocalModelPerformance(outputTokens: tokens, durationNanoseconds: duration))
+        }
+        let canvasWidth: CGFloat = 140
+        let scale: CGFloat = 2
+        for (index, reading) in readings.enumerated() {
+            var snapshot = try XCTUnwrap(runtime(names: ["qwen3:32b"]).notchSnapshots.first)
+            snapshot.localPerformance = reading
+            let renderer = ImageRenderer(content: ProviderCell(snapshot: snapshot).frame(width: canvasWidth))
+            renderer.scale = scale
+            let image = try XCTUnwrap(renderer.cgImage)
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            let labelTop = Int(ceil((NotchLayout.ringDiameter + NotchLayout.ringLabelGap) * scale))
+            var columns: [Int] = []
+            for x in 0..<bitmap.pixelsWide {
+                if (labelTop..<bitmap.pixelsHigh).contains(where: { y in
+                    (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.1
+                }) { columns.append(x) }
+            }
+            let left = try XCTUnwrap(columns.first, "The reading must remain visible")
+            let right = try XCTUnwrap(columns.last)
+            let inset = (canvasWidth - NotchLayout.ringDiameter) / 2 * scale
+            XCTAssertGreaterThanOrEqual(CGFloat(left), inset - 1, snapshot.headlineText)
+            XCTAssertLessThanOrEqual(CGFloat(right), (canvasWidth * scale) - inset + 1, snapshot.headlineText)
+            if let reading { XCTAssertFalse(reading.band.label.isEmpty) }
+            try save(NSImage(cgImage: image, size: .zero), name: "speed-label-\(index).png")
         }
     }
 
@@ -123,7 +146,7 @@ final class OllamaPerformanceViewTests: XCTestCase {
         let names = ["deepseek-r1:1.5b", "gemma4:e4b", "llama3.2:1b", "ministral-3:3b", "qwen3:0.6b"]
         let vm = NotchViewModel()
         vm.updateSnapshots([Fixtures.snapshots()[0], try runtime(names: names)])
-        let speeds = [60, 30, 15, 5]
+        let speeds = [999, 30, 15, 5]
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         vm.now = date.addingTimeInterval(120)
         vm.updatePerformances(Dictionary(uniqueKeysWithValues: zip(names, speeds).map { name, speed in
