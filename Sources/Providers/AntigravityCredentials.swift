@@ -21,6 +21,16 @@ struct AntigravityCredentials {
 
     static func forgetCached() { cache.forget() }
 
+    /// Whatever a previous fetch already read, without asking macOS again.
+    static var held: AntigravityCredentials? { cache.held }
+
+    /// Whether Antigravity has filed a credential at all, judged from the
+    /// item's attributes rather than its contents — those are not behind the
+    /// access prompt the secret is, so this can be asked freely.
+    static func isSignedIn() -> Bool {
+        KeychainItem.modifiedAt(service: service, account: account) != nil
+    }
+
     /// Antigravity stores through Go's `keyring` package, which base64-encodes
     /// the payload behind this marker rather than writing raw JSON the way
     /// Claude Code does. Decoding it is not optional: without stripping the
@@ -46,6 +56,10 @@ struct AntigravityCredentials {
 
         guard status == errSecSuccess, let data = item as? Data else {
             Log.usage.error("antigravity keychain read failed: OSStatus \(status)")
+            // See `ClaudeCredentials.wasTransient` — a machine just woken
+            // from sleep answers this for a read the account had nothing to
+            // do with, and it must not be treated as a sign-out.
+            if ClaudeCredentials.wasTransient(status) { throw UsageProviderError.credentialExpired }
             throw ClaudeCredentials.wasRefused(status)
                 ? UsageProviderError.accessDenied
                 : UsageProviderError.needsAuth

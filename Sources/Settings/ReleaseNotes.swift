@@ -31,6 +31,135 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "1.6.0",
+            headline: "Reorder the rings, pick a display, and get told when a limit is close.",
+            changes: [
+                ReleaseNote.Change(
+                    title: "Drag to reorder the rings",
+                    detail: "Settings splits into Connected and Not connected; "
+                          + "drag a connected row by its handle to change the "
+                          + "order the notch draws them in."
+                ),
+                ReleaseNote.Change(
+                    title: "Pin the notch to one display, or show it on every one",
+                    detail: "A Displays picker in Appearance offers the main "
+                          + "display or all of them; a second picker pins a "
+                          + "single notch to a named screen."
+                ),
+                ReleaseNote.Change(
+                    title: "A ring says when it crosses 80% and 100%",
+                    detail: "A system notification once per crossing, muted "
+                          + "per provider from its own settings row."
+                ),
+                ReleaseNote.Change(
+                    title: "GitHub Copilot is a new ring",
+                    detail: "Reads GitHub's Copilot quota endpoint using the "
+                          + "GitHub CLI session already on the Mac."
+                ),
+                ReleaseNote.Change(
+                    title: "Say when a session ends",
+                    detail: "The notch opens itself for a few seconds and "
+                          + "sounds a chime when an agent stops working or "
+                          + "starts waiting on you; a click jumps to it."
+                ),
+                ReleaseNote.Change(
+                    title: "⌥-drag the pill along its edge",
+                    detail: "Nudge it clear of another menu-bar app anchored "
+                          + "to the same spot; remembered per edge."
+                ),
+                ReleaseNote.Change(
+                    title: "Choose an accent colour",
+                    detail: "The device accent by default, or a fixed colour "
+                          + "for the ring's positive state — the amber and "
+                          + "red warning colours stay fixed regardless."
+                ),
+                ReleaseNote.Change(
+                    title: "A countdown instead of a reset date",
+                    detail: "Appearance's Reset time picker can show \"Resets "
+                          + "in 3h 20m\" instead of a date and time."
+                ),
+                ReleaseNote.Change(
+                    title: "Read Cursor from cursor-agent, and enterprise plans correctly",
+                    detail: "A CLI-only Cursor login now gets a ring, and "
+                          + "enterprise/team plans read their real usage "
+                          + "instead of reporting nothing to meter."
+                ),
+                ReleaseNote.Change(
+                    title: "Fewer keychain prompts for Claude and Antigravity",
+                    detail: "Claude reads its own CLI's /usage first, "
+                          + "touching the keychain only as a fallback; "
+                          + "Antigravity's language server is asked before it."
+                ),
+                ReleaseNote.Change(
+                    title: "Sub-1% usage no longer reads as 0%",
+                    detail: "A reading under one percent shows a tenth "
+                          + "(\"<0.1%\") instead of rounding to nothing."
+                ),
+                ReleaseNote.Change(
+                    title: "Contributors can build without Xcode signing",
+                    detail: "make build and make test sign themselves "
+                          + "automatically when the maintainer's certificate "
+                          + "isn't present, and CI now runs the suite on "
+                          + "every push and pull request."
+                )
+            ]
+        ),
+        ReleaseNote(
+            version: "1.5.0",
+            headline: "Two more providers, and a live account plan that was silently dropped.",
+            changes: [
+                ReleaseNote.Change(
+                    title: "Grok is a new ring",
+                    detail: "SuperGrok's weekly Grok Build allowance, read from "
+                          + "the same billing endpoint the CLI uses, with the "
+                          + "session in ~/.grok/auth.json."
+                ),
+                ReleaseNote.Change(
+                    title: "OpenCode's Go plan is a new ring",
+                    detail: "Reads the Go plan's official usage endpoint with "
+                          + "the key OpenCode itself stores on sign-in — no "
+                          + "second sign-in."
+                ),
+                ReleaseNote.Change(
+                    title: "A real Codex account went unmetered",
+                    detail: "Codex's live reading only recognised a 5-hour and "
+                          + "a 7-day window. A free-plan account's real limit "
+                          + "was a 30-day one, which fell through unnoticed and "
+                          + "showed as nothing metered on an account that was "
+                          + "genuinely tracked."
+                ),
+                ReleaseNote.Change(
+                    title: "Switching a provider off now really stops it",
+                    detail: "Opening Settings could still read a switched-off "
+                          + "provider's account, and a reply already in flight "
+                          + "could restore a reading you had just asked it to "
+                          + "forget."
+                ),
+                ReleaseNote.Change(
+                    title: "Contributors can build without a certificate",
+                    detail: "make build and make test now sign themselves "
+                          + "automatically when the maintainer's Developer ID "
+                          + "isn't present — no Apple account needed to work "
+                          + "on this."
+                )
+            ]
+        ),
+        ReleaseNote(
+            version: "1.4.1",
+            headline: "Waking from sleep no longer erases a reading.",
+            changes: [
+                ReleaseNote.Change(
+                    title: "A ring survives waking your Mac",
+                    detail: "A brief window right after sleep, where macOS "
+                          + "won't allow a keychain prompt yet, was mistaken "
+                          + "for being signed out — which erased the reading "
+                          + "and left \"waiting for the first reading\" on "
+                          + "screen. It now ages the number instead of "
+                          + "throwing it away, and picks back up on its own."
+                )
+            ]
+        ),
+        ReleaseNote(
             version: "1.4.0",
             headline: "Two more accounts, four community fixes, and honest duplicates.",
             changes: [

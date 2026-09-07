@@ -22,6 +22,7 @@ final class UsageStore: ObservableObject {
             guard disconnected != oldValue else { return }
             for id in disconnected.subtracting(oldValue) { cancelRefresh(providerID: id) }
             snapshots.removeAll { disconnected.contains($0.id) }
+            refusedAccess.subtract(disconnected)
             // The remembered reading has to go as well. Dropping it from
             // `snapshots` alone left it in `lastGood`, which is written to the
             // archive wholesale on every fetch — so a switched-off provider was
@@ -39,6 +40,29 @@ final class UsageStore: ObservableObject {
                 refreshLocalRuntimes()
             }
         }
+    }
+
+    /// The order the user has put the rings in, as provider ids.
+    ///
+    /// Held here rather than at each consumer because there are two consumers —
+    /// the notch reads `snapshots`, settings reads `providerSummaries` — and
+    /// they have to agree. Sorting each of them separately makes that agreement
+    /// something two call sites have to keep remembering.
+    @Published var order: [String] = [] {
+        didSet {
+            guard order != oldValue else { return }
+            // Reordered in place, not refetched. The user has just dragged a
+            // row and the rings have to follow now; re-reading every credential
+            // to answer a question about layout would spend Claude's
+            // rate-limit budget on nothing.
+            snapshots = ProviderOrder.arrange(snapshots, by: order, id: \.id)
+        }
+    }
+
+    /// `providers` in the user's order. Every read of `providers` that ends up
+    /// on screen goes through this.
+    private var orderedProviders: [UsageProvider] {
+        ProviderOrder.arrange(providers, by: order, id: \.id)
     }
 
     /// Whether any provider is actively being used right now. Your usage cannot
@@ -79,7 +103,8 @@ final class UsageStore: ObservableObject {
         idleRefreshInterval: TimeInterval = 5 * 60,
         staleAfter: TimeInterval = 15 * 60,
         archive: UsageArchive = UsageArchive(),
-        disconnected: Set<String> = []
+        disconnected: Set<String> = [],
+        order: [String] = []
     ) {
         self.providers = providers
         self.refreshInterval = refreshInterval
@@ -95,6 +120,7 @@ final class UsageStore: ObservableObject {
         // `lastGood` is still empty, so it wrote an empty archive and destroyed
         // every remembered reading on any launch with a provider switched off.
         _disconnected = Published(initialValue: disconnected)
+        _order = Published(initialValue: order)
         lastGood = archive.load()
         for provider in providers where provider.kind == .localRuntime {
             lastGood.removeValue(forKey: provider.id)
@@ -111,7 +137,7 @@ final class UsageStore: ObservableObject {
         // Filtered here, not only in `didSet`. The store is built before the
         // preference reaches it, so an unfiltered first pass draws every
         // switched-off provider for as long as it takes the binding to arrive.
-        snapshots = providers.filter { !disconnected.contains($0.id) }.map { provider in
+        snapshots = orderedProviders.filter { !disconnected.contains($0.id) }.map { provider in
             guard let remembered = lastGood[provider.id] else { return Self.placeholder(provider) }
             var snapshot = remembered.snapshot
             snapshot.status = .stale(since: remembered.fetchedAt)
@@ -121,9 +147,10 @@ final class UsageStore: ObservableObject {
 
     /// Enough to list the providers in settings without exposing them.
     var providerSummaries: [ProviderSummary] {
-        providers.map { provider in
+        orderedProviders.map { provider in
             ProviderSummary(kind: provider.kind, id: provider.id, name: provider.displayName,
-                            glyph: provider.glyph, account: provider.account(),
+                            glyph: provider.glyph,
+                            account: disconnected.contains(provider.id) ? nil : provider.account(),
                             signIn: provider.signInRoute,
                             wasRefusedAccess: refusedAccess.contains(provider.id))
         }
@@ -202,7 +229,7 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
-        let tasks = providers.filter { !disconnected.contains($0.id) }.map {
+        let tasks = orderedProviders.filter { !disconnected.contains($0.id) }.map {
             beginRefresh($0)
         }
         for task in tasks { await task.value }
@@ -265,7 +292,7 @@ final class UsageStore: ObservableObject {
         guard !disconnected.contains(snapshot.id) else { return }
         var current = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
         current[snapshot.id] = snapshot
-        snapshots = providers.compactMap { disconnected.contains($0.id) ? nil : current[$0.id] }
+        snapshots = orderedProviders.compactMap { disconnected.contains($0.id) ? nil : current[$0.id] }
     }
 
     /// Sign out of one provider: discard anything of its account that this app
@@ -283,6 +310,7 @@ final class UsageStore: ObservableObject {
     func signOut(providerID: String) {
         guard let provider = providers.first(where: { $0.id == providerID }) else { return }
         cancelRefresh(providerID: providerID)
+        refusedAccess.remove(providerID)
         snapshots.removeAll { $0.id == providerID }
         lastGood.removeValue(forKey: providerID)
         archive.forget(providerID)
@@ -353,6 +381,9 @@ final class UsageStore: ObservableObject {
     }
 
     private func snapshot(from provider: UsageProvider, generation: Int) async -> ProviderSnapshot? {
+        // A scheduled task can be disconnected before it begins; avoid reading
+        // its credential at all, as well as rejecting an obsolete response.
+        guard acceptsResult(from: provider, generation: generation) else { return nil }
         do {
             let fresh = try await provider.fetchSnapshot()
             guard acceptsResult(from: provider, generation: generation) else { return nil }
