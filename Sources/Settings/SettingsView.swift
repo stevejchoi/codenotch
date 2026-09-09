@@ -9,13 +9,14 @@ import Combine
 /// crossing-and-notification machinery it switches is Notifications' to
 /// explain.
 private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case accounts, appearance, notifications, general
+    case accounts, ollama, appearance, notifications, general
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .accounts:      return "Accounts"
+        case .ollama:        return "Ollama"
         case .appearance:    return "Appearance"
         case .notifications: return "Notifications"
         case .general:       return "General"
@@ -25,6 +26,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     var icon: String {
         switch self {
         case .accounts:      return "person.crop.circle.fill"
+        case .ollama:        return "desktopcomputer"
         case .appearance:    return "paintbrush.fill"
         case .notifications: return "bell.badge.fill"
         case .general:       return "gearshape.fill"
@@ -37,6 +39,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     var tint: Color {
         switch self {
         case .accounts:      return .blue
+        case .ollama:        return .teal
         case .appearance:    return .indigo
         case .notifications: return .red
         case .general:       return .gray
@@ -323,6 +326,15 @@ struct SettingsView: View {
     private func paneContent(for section: SettingsSection) -> some View {
         switch section {
         case .accounts:      accountsPane
+        case .ollama:
+            if let usageStore {
+                Form {
+                    Section("Connection") {
+                        OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
+                    }
+                }
+                .formStyle(.grouped)
+            }
         case .appearance:    appearancePane
         case .notifications: notificationsPane
         case .general:       generalPane
@@ -347,10 +359,7 @@ struct SettingsView: View {
                                takePlaceOf: { move($0, onto: account.id) },
                                didConnect: { connect(account.id) })
                 }
-                if let usageStore, preferences.isConnected("ollama") {
-                    OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
-                }
-                if connected.isEmpty && !(usageStore != nil && preferences.isConnected("ollama")) {
+                if connected.isEmpty {
                     Text("Nothing is connected, so the notch has no rings to draw.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -377,7 +386,7 @@ struct SettingsView: View {
 
             // Absent rather than empty when everything is on: a titled, empty
             // group reads as something having failed to load.
-            if !notConnected.isEmpty || (usageStore != nil && !preferences.isConnected("ollama")) {
+            if !notConnected.isEmpty {
                 Section("Not connected") {
                     ForEach(notConnected) { account in
                         AccountRow(provider: account, preferences: preferences,
@@ -389,9 +398,6 @@ struct SettingsView: View {
                                    onDrop: {},
                                    takePlaceOf: { _ in false },
                                    didConnect: { connect(account.id) })
-                    }
-                    if let usageStore, !preferences.isConnected("ollama") {
-                        OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
                     }
                     // Says what switching one back on will do, which is the
                     // only question this group raises.

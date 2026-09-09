@@ -651,6 +651,41 @@ final class OllamaLifecycleTests: XCTestCase {
         XCTAssertEqual(store.snapshots.map(\.id), ["cloud", "ollama"])
     }
 
+    func testLocalTimerDetectsAndRemovesModelsWithoutManualRefresh() async throws {
+        let local = RuntimeStub(), cloud = QuotaStub()
+        let store = UsageStore(providers: [cloud, local], archive: UsageArchive(defaults: isolatedDefaults()))
+        store.start()
+        defer { store.stop() }
+        await started(local)
+        let loaded = expectation(description: "Model discovered by the default local timer")
+        let removed = expectation(description: "Unloaded model removed by the default local timer")
+        let modelID = "ollama:model:qwen3:8b"
+        var wasLoaded = false
+        var wasRemoved = false
+        let subscription = store.$notchSnapshots.sink { cells in
+            if cells.contains(where: { $0.id == modelID }), !wasLoaded {
+                wasLoaded = true
+                loaded.fulfill()
+            } else if wasLoaded && !wasRemoved && !cells.contains(where: { $0.id == modelID }) {
+                wasRemoved = true
+                removed.fulfill()
+            }
+        }
+        defer { subscription.cancel() }
+        local.models = try OllamaUsage.parse(Data(#"{"models":[{"name":"qwen3:8b"}]}"#.utf8)).models
+        await fulfillment(of: [loaded], timeout: 2.5)
+        XCTAssertEqual(store.localModelSummaries.map(\.id), [modelID])
+        local.models = []
+        await fulfillment(of: [removed], timeout: 2.5)
+        XCTAssertTrue(store.localModelSummaries.isEmpty)
+        XCTAssertEqual(cloud.calls, 1, "Frequent local discovery must not refresh cloud usage")
+
+        store.disconnected = ["ollama"]
+        let calls = local.calls
+        try await Task.sleep(for: .milliseconds(1100))
+        XCTAssertEqual(local.calls, calls, "Disabled monitoring must stop local requests")
+    }
+
     func testChangingEndpointClearsOldReadingAndDoesNotEnableMonitoring() async throws {
         let provider = OllamaProvider(endpoint: try OllamaEndpoint.parse(OllamaEndpoint.defaultAddress))
         let store = UsageStore(providers: [provider], archive: UsageArchive(defaults: isolatedDefaults()),

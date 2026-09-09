@@ -8,10 +8,10 @@ off. Other runtimes and cumulative token totals remain future work.
 
 ## Accounts and model ordering
 
-Ollama now uses the existing Connected and Not connected sections in Accounts.
-Its connection row retains the monitoring switch, editable server address and
-connection check. There is no separate Local models section or relay-address
-copy control; relay configuration remains documented in the README.
+Ollama has its own Settings page for the monitoring switch, editable server
+address, connection check, and speed/thinking connection status and instructions.
+Accounts contains the detected model rows in Connected and Not connected.
+There is no separate Local models section or relay-address copy control.
 
 Each detected model appears as an ordinary draggable row in Connected. The
 open Settings view subscribes to projected snapshot updates, so loading or
@@ -25,6 +25,22 @@ a model appends it to the connected list. Switching off the Ollama connection
 stops all of its monitoring and clears detected models. Neither switch starts
 or unloads a model. Model order and visibility survive app relaunches; inventory
 and performance readings remain ephemeral.
+
+Local inventory polling runs every second independently of cloud quota polling,
+so a model stopped through the ordinary Ollama address leaves the UI on the next
+poll. Speed still requires a completed native response through port 11435;
+direct requests to 11434 cannot be observed. The separate Ollama page exposes
+this requirement and the listener's current status. Closing Codenotch closes
+the measurement connection too.
+
+The 2026-09-09 correction passed 816 tests (815 passed, one opt-in live listing
+test skipped). A running-app check then generated a short native response through
+11435: 3 output tokens in 25,359,000 ns appeared as 118.3 tok/s in the model's
+notch accessibility reading. The newly loaded Ministral row appeared in
+Connected. Unloading it through the ordinary 11434 endpoint removed the row
+from the still-open Accounts page and from the notch without manual refresh.
+The test started and ended with an empty model inventory. This confirms the
+measurement path, not a sustained performance benchmark.
 
 ## Local smoke verification
 

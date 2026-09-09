@@ -75,6 +75,7 @@ final class UsageStore: ObservableObject {
     var isBusy: () -> Bool = { false }
 
     private let refreshInterval: TimeInterval
+    private let localRefreshInterval: TimeInterval
     /// How long a snapshot stays believable after its last successful fetch.
     ///
     /// Comfortably above `idleRefreshInterval`, on purpose. With the two equal,
@@ -104,6 +105,7 @@ final class UsageStore: ObservableObject {
     init(
         providers: [UsageProvider],
         refreshInterval: TimeInterval = 60,
+        localRefreshInterval: TimeInterval = 1,
         idleRefreshInterval: TimeInterval = 5 * 60,
         staleAfter: TimeInterval = 15 * 60,
         archive: UsageArchive = UsageArchive(),
@@ -112,6 +114,7 @@ final class UsageStore: ObservableObject {
     ) {
         self.providers = providers
         self.refreshInterval = refreshInterval
+        self.localRefreshInterval = localRefreshInterval
         self.idleRefreshInterval = idleRefreshInterval
         self.staleAfter = staleAfter
         self.archive = archive
@@ -190,7 +193,7 @@ final class UsageStore: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
 
-        let localTimer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+        let localTimer = Timer(timeInterval: localRefreshInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshLocalRuntimes() }
         }
         RunLoop.main.add(localTimer, forMode: .common)

@@ -47,12 +47,15 @@ struct OllamaSettingsRow: View {
             } else if !enabled {
                 Text("Monitoring off.")
                     .foregroundStyle(.secondary)
-            } else if checking {
+            } else if checking && snapshot?.hasReading != true {
                 Text("Checking Ollama…").foregroundStyle(.secondary)
             } else {
                 Text(snapshot?.localRuntime?.summary ?? snapshot?.statusMessage ?? "Connecting to Ollama…")
                     .foregroundStyle(snapshot?.hasReading == true ? Color.secondary : .orange)
             }
+
+            Text("Detected models appear in Accounts → Connected. Model loading and unloading is checked every second.")
+                .foregroundStyle(.secondary)
 
             if enabled, let relay {
                 OllamaRelayStatus(relay: relay)
@@ -82,9 +85,24 @@ private struct OllamaRelayStatus: View {
     @ObservedObject var relay: OllamaActivityRelay
 
     var body: some View {
-        if !relay.ready {
-            Text(relay.status).foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Speed and thinking").font(.body.weight(.medium))
+            Text(relay.ready ? "Listening at \(OllamaActivityRelay.address)" : relay.status)
+                .foregroundStyle(relay.ready ? Color.secondary : .orange)
                 .textSelection(.enabled)
+            if relay.ready {
+                Text(relay.performances.isEmpty
+                     ? "Waiting for a completed response through this address."
+                     : "Generation speed received for \(relay.performances.count) model(s).")
+                    .foregroundStyle(.secondary)
+                Text("Set your chat client's Ollama address to the one above, or run this in Terminal:")
+                    .foregroundStyle(.secondary)
+                Text("OLLAMA_HOST=\(OllamaActivityRelay.address) ollama")
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                Text("Keep Codenotch open. Speed appears after each completed native Ollama response. Requests sent directly to the server address only provide model detection here.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

@@ -43,9 +43,9 @@ them, and its ring appears. Switching a provider off in Settings stops its
 usage polling and forgets the readings taken from it; it does
 not sign you out of the tool that owns the account, and the row says so.
 
-**Ollama monitoring is opt-in.** Switch **Ollama** on under **Settings → Accounts
-→ Not connected**. Its connection row then moves to **Connected**. It checks
-`http://127.0.0.1:11434` every 15 seconds; the address can be
+**Ollama monitoring is opt-in.** Switch **Monitor Ollama** on under
+**Settings → Ollama**. It checks
+`http://127.0.0.1:11434` every second; the address can be
 changed to another HTTP port on this Mac. Each loaded model gets its own
 cell showing its last measured generation speed, such as **30 tok/s**, or
 **— tok/s** until measured. Qwen, Gemma, Llama (Meta), DeepSeek
@@ -59,8 +59,8 @@ while Settings is open. Drag a model between other providers to place its notch
 cell; the order is remembered across launches. Switching a model off moves it
 to **Not connected** and hides its cell while it stays loaded in Ollama.
 Switching it back on appends it to the connected list. Unloaded models leave
-both lists. The Ollama connection row keeps the server address and the switch
-for all monitoring.
+both lists. The separate Ollama settings page keeps the server address and
+the switch for all monitoring; Accounts contains the detected model rows.
 Clicking a model animates only that cell while refreshing the shared inventory.
 Background polls leave model icons still; newly detected models appear after
 the models already shown, with their own entrance animation.
@@ -72,6 +72,10 @@ are not saved across launches. Monitoring never initiates inference.
 Enabling Ollama monitoring also starts the local relay. For speed measurements
 and a live **Thinking** indicator, point your Ollama client at
 `http://127.0.0.1:11435` while Codenotch is open. The backend stays on `11434`.
+Settings → Ollama shows whether this connection is listening or unavailable,
+whether it has received generation speed, and the Terminal command to use it.
+Ordinary `ollama` commands using `11434` are detected but cannot supply speed
+or thinking to Codenotch. Closing Codenotch also closes `11435`.
 For example:
 
 ```sh
