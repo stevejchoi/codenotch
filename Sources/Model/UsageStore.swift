@@ -2,8 +2,8 @@ import AppKit
 import Combine
 import os
 
-/// Fetches every provider on a timer and keeps the last good answer around, so
-/// a dropped network shows yesterday's number dimmed rather than a blank ring.
+/// Quota readings remain useful during transient failures. Clear local inventory
+/// when the server cannot confirm which models are still loaded.
 @MainActor
 final class UsageStore: ObservableObject {
     @Published private(set) var snapshots: [ProviderSnapshot] = [] {
@@ -18,9 +18,8 @@ final class UsageStore: ObservableObject {
     @Published private(set) var refusedAccess: Set<String> = []
 
     private let providers: [UsageProvider]
-    /// Providers the user has switched off. They are not fetched at all — their
-    /// credential is never read, which is the whole point of switching one off.
-    /// Filtering the results afterwards would still touch the keychain.
+    /// Provider IDs block fetching before credential access. Model IDs only hide
+    /// their cells so disabling one model does not stop the shared runtime.
     @Published var disconnected: Set<String> = [] {
         didSet {
             guard disconnected != oldValue else { return }

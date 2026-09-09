@@ -6,12 +6,9 @@ import os
 /// What the user has chosen, kept in `UserDefaults`.
 @MainActor
 final class Preferences: ObservableObject {
-    /// Providers the user has switched off. Stored as the *disconnected* set
-    /// rather than the connected one, so a provider added in a later version is
-    /// on by default instead of silently staying dark.
-    ///
-    /// Switching one off is not merely hiding it: the store stops fetching it,
-    /// so its credential is never read at all.
+    /// Remember disabled IDs so future providers default on; Ollama is explicitly
+    /// seeded off once. Model IDs hide individual cells without disabling the
+    /// shared runtime.
     @Published var disconnectedProviders: Set<String> {
         didSet { defaults.set(Array(disconnectedProviders), forKey: Keys.disconnected) }
     }

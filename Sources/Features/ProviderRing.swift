@@ -160,7 +160,6 @@ private struct ActivityArc: View {
     }
 }
 
-/// A provider mark and its primary reading.
 struct ProviderCell: View {
     let snapshot: ProviderSnapshot
     var activity: ActivitySummary?

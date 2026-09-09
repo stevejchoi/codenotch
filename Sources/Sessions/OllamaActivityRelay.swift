@@ -35,7 +35,8 @@ final class OllamaActivityRelay: ObservableObject {
                         self.recordPerformance(measurement, model: model)
                     }
                 }) { [weak self] id, model, active in
-                    // Enqueued from one NIO event loop in stream order.
+                    // Preserve the single NIO event loop's order so a thinking
+                    // stop cannot reach the UI before its start.
                     DispatchQueue.main.async {
                         guard let self, self.revision == revision else { return }
                         self.observe(id: id, model: model, thinking: active)
@@ -59,7 +60,7 @@ final class OllamaActivityRelay: ObservableObject {
         let key = OllamaThinkingStream.modelKey(model)
         if let previous = performances[key], previous.measuredAt > measurement.measuredAt { return }
         performances[key] = measurement
-        // Keep only the latest number per model, with bounded in-memory history.
+        // Model names can accumulate for the app's lifetime, so cap this cache.
         if performances.count > 128,
            let oldest = performances.min(by: { $0.value.measuredAt < $1.value.measuredAt })?.key {
             performances.removeValue(forKey: oldest)

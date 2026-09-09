@@ -289,6 +289,7 @@ enum NotchLayout {
         }
 
         if let localModelName {
+            // Match RuntimeModelDetails so the panel and hover region fit all rows.
             height += headerToBlock + modelNameHeight(localModelName)
                 + blockSpacing + 6 * cardBodyLineHeight + 5 * sessionRowGap
         } else if windowCount > 0 {

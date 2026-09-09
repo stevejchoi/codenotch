@@ -25,11 +25,12 @@ final class NotchViewModel: ObservableObject {
         snapshot.localPerformance = performances[OllamaThinkingStream.modelKey(model.name)]
         return snapshot
     }
+    @Published var thinkingModels: [String: Date] = [:]
+
     /// Live agent sessions, keyed by the provider they belong to. They surface
     /// inside that provider's own ring rather than as a cell of their own — one
     /// ring per provider, so nothing in the notch looks like a ring without
     /// being one.
-    @Published var thinkingModels: [String: Date] = [:]
     @Published var sessions: [String: [AgentSession]] = [:]
 
     /// Which cell the cursor is over, if any. Driven from the window controller

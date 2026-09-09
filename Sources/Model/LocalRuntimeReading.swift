@@ -1,5 +1,3 @@
-// store info from ollama
-
 import Foundation
 
 struct LocalRuntimeReading: Equatable {

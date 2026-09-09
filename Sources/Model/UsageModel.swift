@@ -216,8 +216,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
         return "—"
     }
 
-    /// True when there is no reading to show — the cell draws an empty ring and
-    /// a dash rather than an authoritative-looking 0%.
+    /// An empty local inventory still confirms server connectivity; an absent
+    /// reading must not be shown as measured zero usage.
     var hasReading: Bool { localRuntime != nil || localModel != nil || !windows.isEmpty }
 
     /// A ring can only be drawn when the provider said what the limit was.

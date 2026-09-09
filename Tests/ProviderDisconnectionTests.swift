@@ -63,8 +63,8 @@ final class ProviderDisconnectionTests: XCTestCase {
         let queued = Probe(id: "b")
         let (store, archive) = makeStore([first, queued])
         store.refreshNow()
-        // This fork starts provider tasks concurrently. Disconnect before the
-        // scheduled refresh can begin, while this provider is still queued.
+        // Disconnect before the concurrent refresh tasks run so the queued
+        // provider must be rejected without fetching it.
         store.disconnected = [queued.id]
         await fulfillment(of: [started], timeout: 2)
         await finish(first, in: store)
@@ -205,8 +205,8 @@ final class ProviderDisconnectionTests: XCTestCase {
             .sink { _ in finished.fulfill() }
         provider.resolve(error: error)
         await fulfillment(of: [finished], timeout: 2)
-        // Cancellation clears this fork's spinner immediately. Still let the
-        // deliberately cancellation-ignoring response reach the result guard.
+        // Cancellation clears the spinner before an uncooperative fetch returns;
+        // wait for its late response to exercise the result guard.
         await waitForResponseProcessing()
         withExtendedLifetime(subscription) {}
     }
