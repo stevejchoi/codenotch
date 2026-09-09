@@ -6,6 +6,26 @@ and a local relay for thinking and generation speed are implemented in the
 working tree. The relay follows the Ollama monitoring switch, which defaults
 off. Other runtimes and cumulative token totals remain future work.
 
+## Accounts and model ordering
+
+Ollama now uses the existing Connected and Not connected sections in Accounts.
+Its connection row retains the monitoring switch, editable server address and
+connection check. There is no separate Local models section or relay-address
+copy control; relay configuration remains documented in the README.
+
+Each detected model appears as an ordinary draggable row in Connected. The
+open Settings view subscribes to projected snapshot updates, so loading or
+unloading a model updates the list without closing the window or re-reading
+cloud credentials. The store applies the same saved order to model cells and
+cloud providers, and each display receives that ordered projection.
+
+Model switches hide or show individual notch cells. Hidden loaded models move
+to Not connected, while the shared Ollama monitor continues polling. Re-enabling
+a model appends it to the connected list. Switching off the Ollama connection
+stops all of its monitoring and clears detected models. Neither switch starts
+or unloads a model. Model order and visibility survive app relaunches; inventory
+and performance readings remain ephemeral.
+
 ## Local smoke verification
 
 Use one [Llama 3.1 8B](https://ollama.com/library/llama3.1:8b) model for the

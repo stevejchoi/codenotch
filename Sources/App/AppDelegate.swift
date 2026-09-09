@@ -272,10 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             self.thresholdNotifier = notifier
 
+            store.$notchSnapshots
+                .receive(on: RunLoop.main)
+                .sink { [weak fleet] in fleet?.setSnapshots($0) }
+                .store(in: &cancellables)
+
             store.$snapshots
                 .receive(on: RunLoop.main)
-                .sink { [weak fleet, weak statusItem] snapshots in
-                    fleet?.setSnapshots(snapshots)
+                .sink { [weak statusItem] snapshots in
                     statusItem?.snapshots = snapshots
                     notifier.observe(snapshots)
                 }

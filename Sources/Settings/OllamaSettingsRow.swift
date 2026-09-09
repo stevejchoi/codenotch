@@ -28,6 +28,7 @@ struct OllamaSettingsRow: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
             }
+            .font(.body)
 
             HStack {
                 TextField("Server address", text: $address)
@@ -81,18 +82,9 @@ private struct OllamaRelayStatus: View {
     @ObservedObject var relay: OllamaActivityRelay
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(relay.status).foregroundStyle(relay.ready ? Color.secondary : .orange)
-                    .textSelection(.enabled)
-                Spacer()
-                Button("Copy address") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(OllamaActivityRelay.address, forType: .string)
-                }.controlSize(.small).disabled(!relay.ready)
-            }
-            Text("Use the relay address in your chat app or OLLAMA_HOST.")
-                .foregroundStyle(.secondary)
+        if !relay.ready {
+            Text(relay.status).foregroundStyle(.orange)
+                .textSelection(.enabled)
         }
     }
 }

@@ -173,8 +173,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
     var localRuntime: LocalRuntimeReading?
     var localModel: LocalRuntimeReading.Model?
     var localPerformance: LocalModelPerformance?
-    /// A model cell has its own identity, but polling and Settings belong to
-    /// the runtime that supplied it.
+    /// A model cell has its own display preference, but polling belongs to the
+    /// runtime that supplied it.
     var sourceProviderID: String?
 
     var providerID: String { sourceProviderID ?? id }

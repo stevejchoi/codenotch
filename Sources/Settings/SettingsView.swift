@@ -1,6 +1,7 @@
 import AppKit
 import CoreTransferable
 import SwiftUI
+import Combine
 
 /// One entry in the sidebar. Grouped by subject rather than by how each
 /// setting is stored — a mute toggle for a provider's threshold alerts lives
@@ -182,6 +183,18 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didChangeScreenParametersNotification
         )) { _ in displays = DisplayOption.connected }
+        .onReceive((usageStore?.$notchSnapshots.eraseToAnyPublisher()
+                    ?? Empty<[ProviderSnapshot], Never>().eraseToAnyPublisher())
+            .receive(on: RunLoop.main)) { _ in
+                // The sheet stays open while models load and unload. Update
+                // those rows without re-reading cloud credentials on each poll.
+                guard let usageStore else { return }
+                let models = usageStore.localModelSummaries
+                let updated = accounts.filter { $0.localModel == nil }.flatMap { account in
+                    [account] + models.filter { $0.sourceProviderID == account.id }
+                }
+                accounts = ProviderOrder.arrange(updated, by: preferences.providerOrder, id: \.id)
+            }
     }
 
     /// The subject list, drawn as a card floating inside the window rather
@@ -334,12 +347,15 @@ struct SettingsView: View {
                                takePlaceOf: { move($0, onto: account.id) },
                                didConnect: { connect(account.id) })
                 }
-                if connected.isEmpty {
+                if let usageStore, preferences.isConnected("ollama") {
+                    OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
+                }
+                if connected.isEmpty && !(usageStore != nil && preferences.isConnected("ollama")) {
                     Text("Nothing is connected, so the notch has no rings to draw.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
-                } else {
+                } else if !connected.isEmpty {
                     Text("The notch draws these in this order. Drag one by its "
                          + "handle to move it.")
                         .font(.caption)
@@ -359,15 +375,9 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let usageStore {
-                Section("Local models") {
-                    OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
-                }
-            }
-
             // Absent rather than empty when everything is on: a titled, empty
             // group reads as something having failed to load.
-            if !notConnected.isEmpty {
+            if !notConnected.isEmpty || (usageStore != nil && !preferences.isConnected("ollama")) {
                 Section("Not connected") {
                     ForEach(notConnected) { account in
                         AccountRow(provider: account, preferences: preferences,
@@ -379,6 +389,9 @@ struct SettingsView: View {
                                    onDrop: {},
                                    takePlaceOf: { _ in false },
                                    didConnect: { connect(account.id) })
+                    }
+                    if let usageStore, !preferences.isConnected("ollama") {
+                        OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
                     }
                     // Says what switching one back on will do, which is the
                     // only question this group raises.
@@ -696,20 +709,26 @@ struct SettingsView: View {
 
     /// The rows the notch actually draws, in the order it draws them.
     ///
-    /// Filtered out of `accounts` rather than kept as a list of its own, so the
-    /// stored order stays one list: a provider switched off keeps its place in
-    /// it, and switching it back on returns it there instead of to the end.
+    /// Model switches control visibility; their shared runtime has its own
+    /// connection row and must remain enabled for its models to appear.
+    private var ringAccounts: [ProviderSummary] {
+        accounts.filter {
+            $0.kind == .usage || ($0.localModel != nil && preferences.isConnected($0.sourceProviderID ?? $0.id))
+        }
+    }
+
     private var connected: [ProviderSummary] {
-        accounts.filter { $0.kind == .usage && preferences.isConnected($0.id) }
+        ringAccounts.filter { preferences.isConnected($0.id) }
     }
 
     private var notConnected: [ProviderSummary] {
-        accounts.filter { $0.kind == .usage && !preferences.isConnected($0.id) }
+        ringAccounts.filter { !preferences.isConnected($0.id) }
     }
 
     /// Nothing to read from anywhere. On a first launch that is the normal
     /// state, and it is the only moment the sheet has something to explain.
     private var needsSetup: Bool {
+        guard !connected.contains(where: { $0.localModel != nil }) else { return false }
         let usageAccounts = accounts.filter { $0.kind == .usage }
         return !usageAccounts.isEmpty && usageAccounts.allSatisfy { $0.account == nil }
     }
@@ -1021,7 +1040,7 @@ private struct AccountRow: View {
                 // Per-provider threshold alerts, muted here rather than in a
                 // separate notifications pane — the thing being muted is this
                 // row's reading, so the control belongs on the row.
-                if isConnected {
+                if isConnected, provider.kind == .usage {
                     Button {
                         preferences.setAlertsMuted(!isMuted, for: provider.id)
                     } label: {
@@ -1065,11 +1084,13 @@ private struct AccountRow: View {
                         .help(destination.help)
                 }
 
-                Toggle("", isOn: binding)
+                Toggle(provider.name, isOn: binding)
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
-                    .help(isConnected
+                    .help(provider.localModel != nil
+                          ? "Show or hide this model in the notch. It stays loaded in Ollama."
+                          : isConnected
                           ? "Switch off to stop reading \(provider.name) and forget its "
                             + "readings. " + provider.signIn.signOutCaveat
                           : "Switch on to sign in and read \(provider.name) again.")
@@ -1153,7 +1174,11 @@ private struct AccountRow: View {
 
     @ViewBuilder
     private var accountDetail: some View {
-        if !isConnected {
+        if let model = provider.localModel {
+            Text(isConnected ? "\(model.memoryText) RAM · via Ollama"
+                 : "Hidden from the notch · Loaded in Ollama")
+                .foregroundStyle(.secondary)
+        } else if !isConnected {
             Text("Signed out — nothing is read, and no readings are kept.")
                 .foregroundStyle(.tertiary)
         } else if let account = provider.account {
@@ -1273,9 +1298,9 @@ private struct AccountRow: View {
                     didConnect()
                     // Nothing to open for Claude Code — but then there is no
                     // account either, so `detail` is already showing what to do.
-                    _ = signIn(provider.id)
+                    if provider.localModel == nil { _ = signIn(provider.id) }
                 } else {
-                    signOut(provider.id)
+                    if provider.localModel == nil { signOut(provider.id) }
                     preferences.setConnected(false, for: provider.id)
                 }
             }

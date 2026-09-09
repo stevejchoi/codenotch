@@ -428,6 +428,89 @@ private final class OllamaStubProtocol: URLProtocol {
 
 @MainActor
 final class OllamaLifecycleTests: XCTestCase {
+    func testDiscoveredModelsJoinSettingsAndShareTheNotchOrder() async throws {
+        let local = RuntimeStub(), cloud = QuotaStub()
+        let store = UsageStore(providers: [cloud, local], archive: UsageArchive(defaults: isolatedDefaults()))
+        XCTAssertTrue(store.localModelSummaries.isEmpty)
+        local.models = try OllamaUsage.parse(Data(#"{"models":[{"name":"qwen3:8b"},{"name":"llama3.1:8b"}]}"#.utf8)).models
+        await store.refresh()
+        let llama = "ollama:model:llama3.1:8b", qwen = "ollama:model:qwen3:8b"
+        XCTAssertEqual(store.notchSnapshots.map(\.id), [cloud.id, llama, qwen])
+        XCTAssertEqual(store.providerSummaries.filter { $0.localModel != nil }.map(\.id), [llama, qwen])
+
+        store.order = [qwen, cloud.id, llama]
+        XCTAssertEqual(store.notchSnapshots.map(\.id), [qwen, cloud.id, llama])
+        XCTAssertEqual(store.providerSummaries.filter { $0.kind == .usage || $0.localModel != nil }.map(\.id),
+                       store.notchSnapshots.map(\.id))
+        XCTAssertEqual(cloud.calls, 1)
+        XCTAssertEqual(local.calls, 1, "Dragging changes display order without polling")
+
+        let fleet = NotchFleet(scope: .allDisplays, edge: .right)
+        fleet.setSnapshots(store.notchSnapshots)
+        fleet.show()
+        defer { fleet.stop() }
+        for controller in fleet.controllersForTesting {
+            XCTAssertEqual(controller.model.snapshots.map(\.id), [qwen, cloud.id, llama])
+        }
+
+        local.models.removeAll { $0.name == "qwen3:8b" }
+        await store.refresh(providerID: "ollama")?.value
+        XCTAssertEqual(store.localModelSummaries.map(\.id), [llama])
+        XCTAssertEqual(store.notchSnapshots.map(\.id), [cloud.id, llama])
+        local.fails = true
+        await store.refresh(providerID: "ollama")?.value
+        XCTAssertTrue(store.localModelSummaries.isEmpty)
+        XCTAssertEqual(store.notchSnapshots.map(\.id), [cloud.id])
+    }
+
+    func testModelVisibilityPersistsWithoutStoppingTheSharedRuntime() async throws {
+        let defaults = isolatedDefaults(), local = RuntimeStub(), cloud = QuotaStub()
+        let preferences = Preferences(defaults: defaults)
+        preferences.setConnected(true, for: "ollama")
+        local.models = try OllamaUsage.parse(Data(#"{"models":[{"name":"qwen3:8b"},{"name":"llama3.1:8b"}]}"#.utf8)).models
+        let store = UsageStore(providers: [cloud, local], archive: UsageArchive(defaults: defaults))
+        await store.refresh()
+        let llama = "ollama:model:llama3.1:8b", qwen = "ollama:model:qwen3:8b"
+        preferences.setProviderOrder([qwen, cloud.id, llama])
+        store.order = preferences.providerOrder
+        preferences.setConnected(false, for: qwen)
+        store.disconnected = preferences.disconnectedProviders
+        XCTAssertEqual(store.notchSnapshots.map(\.id), [cloud.id, llama])
+        XCTAssertTrue(store.localModelSummaries.contains { $0.id == qwen }, "Hidden models remain available in Not connected")
+        XCTAssertTrue(preferences.isConnected("ollama"))
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(local.calls, 1)
+        XCTAssertEqual(cloud.calls, 1)
+
+        let restored = Preferences(defaults: defaults)
+        let relaunched = UsageStore(providers: [cloud, local], archive: UsageArchive(defaults: defaults),
+                                    disconnected: restored.disconnectedProviders, order: restored.providerOrder)
+        await relaunched.refresh()
+        XCTAssertEqual(relaunched.notchSnapshots.map(\.id), [cloud.id, llama])
+        restored.setConnected(true, for: qwen)
+        restored.setProviderOrder(ProviderOrder.joiningConnected(qwen, in: restored.providerOrder,
+                                                                 isConnected: restored.isConnected))
+        relaunched.disconnected = restored.disconnectedProviders
+        relaunched.order = restored.providerOrder
+        XCTAssertEqual(relaunched.notchSnapshots.map(\.id), [cloud.id, llama, qwen])
+        relaunched.disconnected.insert("ollama")
+        XCTAssertTrue(relaunched.localModelSummaries.isEmpty)
+        XCTAssertEqual(relaunched.notchSnapshots.map(\.id), [cloud.id])
+    }
+
+    func testNewlyLoadedModelsDoNotShuffleExistingRowsBeforeAnOrderIsChosen() async throws {
+        let local = RuntimeStub(), cloud = QuotaStub()
+        let store = UsageStore(providers: [local, cloud], archive: UsageArchive(defaults: isolatedDefaults()))
+        for names in [["z-model"], ["a-model", "z-model"]] {
+            let data = try JSONSerialization.data(withJSONObject: ["models": names.map { ["name": $0] }])
+            local.models = try OllamaUsage.parse(data).models
+            await store.refresh()
+        }
+        XCTAssertEqual(store.notchSnapshots.map(\.id), ["ollama:model:z-model", "ollama:model:a-model", cloud.id])
+        XCTAssertEqual(store.providerSummaries.filter { $0.kind == .usage || $0.localModel != nil }.map(\.id),
+                       store.notchSnapshots.map(\.id))
+    }
+
     func testOptInMigrationRunsOnceAndPreservesOtherChoices() {
         let defaults = isolatedDefaults()
         defaults.set(["cursor"], forKey: "hiddenProviders")
@@ -604,6 +687,7 @@ private final class RuntimeStub: UsageProvider {
     var calls = 0
     var fails = false
     var suspended = false
+    var models: [LocalRuntimeReading.Model] = []
     private var continuations: [CheckedContinuation<Void, Never>] = []
     init(id: String = "ollama", kind: ProviderKind = .localRuntime) {
         self.id = id
@@ -615,7 +699,7 @@ private final class RuntimeStub: UsageProvider {
         if fails { throw OllamaError.unavailable }
         return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                 fidelity: .official, status: .ok, windows: [],
-                                kind: kind, localRuntime: LocalRuntimeReading(models: []))
+                                kind: kind, localRuntime: LocalRuntimeReading(models: models))
     }
     func finish() {
         guard !continuations.isEmpty else { return }
@@ -645,6 +729,61 @@ private func ollamaSnapshot(_ reading: LocalRuntimeReading) -> ProviderSnapshot 
 
 @MainActor
 final class OllamaRenderTests: XCTestCase {
+    func testOpenSettingsUpdatesAsModelsAreDetectedReorderedAndHidden() async throws {
+        let domain = "OllamaAccountRenderTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let preferences = Preferences(defaults: defaults)
+        let local = RuntimeStub(), cloud = QuotaStub()
+        let store = UsageStore(providers: [cloud, local], archive: UsageArchive(defaults: defaults),
+                               disconnected: preferences.disconnectedProviders)
+        let content = SettingsView(preferences: preferences, providers: { store.providerSummaries },
+            signOut: { store.signOut(providerID: $0) }, signIn: { store.signIn(providerID: $0) },
+            switchAccount: { _ in false }, retry: { store.refresh(providerID: $0) },
+            updater: Updater(), usageStore: store)
+            .frame(width: SettingsView.width, height: SettingsView.height)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let hosting = NSHostingView(rootView: content)
+        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000,
+            width: SettingsView.width, height: SettingsView.height),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.isReleasedWhenClosed = false
+        window.orderFront(nil)
+        defer { window.close() }
+
+        func capture(_ state: String) async throws {
+            try await Task.sleep(nanoseconds: 600_000_000)
+            hosting.layoutSubtreeIfNeeded()
+            let rep = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            let image = NSImage(size: hosting.bounds.size)
+            image.addRepresentation(rep)
+            try save(image, name: "ollama-accounts-\(state).png")
+        }
+        try await capture("off")
+        preferences.setConnected(true, for: "ollama")
+        store.disconnected = preferences.disconnectedProviders
+        await store.refresh()
+        try await capture("empty")
+        local.models = try OllamaUsage.parse(Data(#"{"models":[{"name":"qwen3:8b","size":6442450944},{"name":"llama3.1:8b","size":4831838208}]}"#.utf8)).models
+        await store.refresh(providerID: "ollama")?.value
+        try await capture("detected")
+        let qwen = "ollama:model:qwen3:8b", llama = "ollama:model:llama3.1:8b"
+        preferences.setProviderOrder([qwen, cloud.id, llama])
+        store.order = preferences.providerOrder
+        try await capture("reordered")
+        preferences.setConnected(false, for: qwen)
+        store.disconnected = preferences.disconnectedProviders
+        try await capture("hidden")
+        local.models = []
+        await store.refresh(providerID: "ollama")?.value
+        try await capture("unloaded")
+        local.fails = true
+        await store.refresh(providerID: "ollama")?.value
+        try await capture("unavailable")
+    }
+
     func testLocalCardsFitTheExistingPanelBudgetOnEveryEdge() throws {
         let models = (0..<8).map { index in
             LocalRuntimeReading.Model(name: "example/long-model-name-\(index):latest",

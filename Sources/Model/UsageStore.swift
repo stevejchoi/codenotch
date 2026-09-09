@@ -6,7 +6,11 @@ import os
 /// a dropped network shows yesterday's number dimmed rather than a blank ring.
 @MainActor
 final class UsageStore: ObservableObject {
-    @Published private(set) var snapshots: [ProviderSnapshot] = []
+    @Published private(set) var snapshots: [ProviderSnapshot] = [] {
+        didSet { updateNotchSnapshots() }
+    }
+    /// Settings and every display share the same ordered, visible model cells.
+    @Published private(set) var notchSnapshots: [ProviderSnapshot] = []
     /// Providers with a fetch in flight, so the cell can show it happening.
     @Published private(set) var refreshing: Set<String> = []
     /// Providers whose last fetch was refused by macOS, cleared as soon as one
@@ -36,7 +40,7 @@ final class UsageStore: ObservableObject {
             let changed = disconnected.symmetricDifference(oldValue)
             if providers.contains(where: { changed.contains($0.id) && $0.kind == .usage }) {
                 refreshNow()
-            } else {
+            } else if providers.contains(where: { changed.contains($0.id) && $0.kind == .localRuntime }) {
                 refreshLocalRuntimes()
             }
         }
@@ -45,7 +49,7 @@ final class UsageStore: ObservableObject {
     /// The order the user has put the rings in, as provider ids.
     ///
     /// Held here rather than at each consumer because there are two consumers —
-    /// the notch reads `snapshots`, settings reads `providerSummaries` — and
+    /// the notch reads `notchSnapshots`, settings reads `providerSummaries` — and
     /// they have to agree. Sorting each of them separately makes that agreement
     /// something two call sites have to keep remembering.
     @Published var order: [String] = [] {
@@ -143,17 +147,38 @@ final class UsageStore: ObservableObject {
             snapshot.status = .stale(since: remembered.fetchedAt)
             return snapshot
         }
+        updateNotchSnapshots()
+    }
+
+    private func updateNotchSnapshots() {
+        let cells = ProviderOrder.cells(from: snapshots, keeping: notchSnapshots)
+        notchSnapshots = ProviderOrder.arrange(cells, by: order, id: \.id)
+            .filter { !disconnected.contains($0.id) }
+    }
+
+    /// Model discovery does not need to re-read any cloud account's credential.
+    var localModelSummaries: [ProviderSummary] {
+        ProviderOrder.cells(from: snapshots, keeping: notchSnapshots).compactMap { cell in
+            guard let model = cell.localModel else { return nil }
+            return ProviderSummary(kind: .localRuntime, localModel: model,
+                                   sourceProviderID: cell.providerID,
+                                   id: cell.id, name: model.name, glyph: cell.glyph,
+                                   account: nil, signIn: .guidance("Loaded in Ollama."))
+        }
     }
 
     /// Enough to list the providers in settings without exposing them.
     var providerSummaries: [ProviderSummary] {
-        orderedProviders.map { provider in
-            ProviderSummary(kind: provider.kind, id: provider.id, name: provider.displayName,
+        let models = localModelSummaries
+        let summaries = orderedProviders.flatMap { provider in
+            let summary = ProviderSummary(kind: provider.kind, id: provider.id, name: provider.displayName,
                             glyph: provider.glyph,
                             account: disconnected.contains(provider.id) ? nil : provider.account(),
                             signIn: provider.signInRoute,
                             wasRefusedAccess: refusedAccess.contains(provider.id))
+            return [summary] + models.filter { $0.sourceProviderID == provider.id }
         }
+        return ProviderOrder.arrange(summaries, by: order, id: \.id)
     }
 
     func start() {

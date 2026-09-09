@@ -8,16 +8,7 @@ final class NotchViewModel: ObservableObject {
 
     func updateSnapshots(_ providerSnapshots: [ProviderSnapshot]) {
         let hoveredID = hoveredSnapshot?.id
-        let next = providerSnapshots.flatMap { provider in
-            let cells = provider.notchSnapshots
-            guard provider.kind == .localRuntime else { return cells }
-            // Inventory is sorted by name. Append newly loaded models instead
-            // of making the existing icons trade places on every discovery.
-            let byID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0) })
-            let retained = snapshots.filter { $0.providerID == provider.id }.compactMap { byID[$0.id] }
-            let retainedIDs = Set(retained.map(\.id))
-            return retained + cells.filter { !retainedIDs.contains($0.id) }
-        }.map(withPerformance)
+        let next = ProviderOrder.cells(from: providerSnapshots, keeping: snapshots).map(withPerformance)
         let nextHoveredIndex = hoveredID.flatMap { id in next.firstIndex { $0.id == id } }
         if hoveredIndex != nextHoveredIndex { hoveredIndex = nextHoveredIndex }
         snapshots = next
