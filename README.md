@@ -32,7 +32,7 @@ A Windows port — Rust/Tauri 2, same design and providers — lives in [`window
 | **Codex** | official | ChatGPT's usage endpoint, using the local Codex sign-in. Shows the 5-hour and weekly limits when available. |
 | **Antigravity** | official where licensed, otherwise a request count | Antigravity's local language server first, then Google's quota endpoint; a plain count when neither will answer for the account. |
 | **GLM** | official | Z.ai's Coding Plan monitor endpoint, with a key borrowed from whichever coding tool already holds one — Claude Code's `settings.json`, ZCode, or OpenCode. |
-| **Ollama** | local runtime | Its local `/api/ps` listing: loaded models, reported model memory and context capacity. Enable it in Settings → Accounts. |
+| **Ollama** | local runtime | Loaded models, RAM and context from the local Ollama server. Enable in Settings → Ollama. |
 | **Grok** | official | The Grok CLI session in `~/.grok/auth.json`, against the same credits billing endpoint `/usage` uses. |
 | **OpenCode** | official | The Go plan's official usage endpoint, with the `opencode-go` key OpenCode itself stores on sign-in. |
 | **GitHub Copilot** | official | GitHub's Copilot quota endpoint, authenticated with the GitHub CLI session already on the Mac (`gh auth login`). |
@@ -43,63 +43,21 @@ them, and its ring appears. Switching a provider off in Settings stops its
 usage polling and forgets the readings taken from it; it does
 not sign you out of the tool that owns the account, and the row says so.
 
-**Ollama monitoring is opt-in.** Switch **Monitor Ollama** on under
-**Settings → Ollama**. It checks
-`http://127.0.0.1:11434` every second; the address can be
-changed to another HTTP port on this Mac. Each loaded model gets its own
-cell showing its last measured generation speed, such as **30 tok/s**, or
-**— tok/s** until measured. Qwen, Gemma, Llama (Meta), DeepSeek
-and Mistral models get their brand icon automatically from the model name;
-unrecognized or custom names use the Ollama llama icon. Hover for the model name,
-last speed, speed band, measurement age, RAM, **Quantization** (such as `Q4_K_M`
-or `Q8_0`) and **Context limit** in tokens;
-this limit is not actual token consumption. A cell
-disappears when its model unloads. Detected models also appear in **Connected**
-while Settings is open. Drag a model between other providers to place its notch
-cell; the order is remembered across launches. Switching a model off moves it
-to **Not connected** and hides its cell while it stays loaded in Ollama.
-Switching it back on appends it to the connected list. Unloaded models leave
-both lists. The separate Ollama settings page keeps the server address and
-the switch for all monitoring; Accounts contains the detected model rows.
-Clicking a model animates only that cell while refreshing the shared inventory.
-Background polls leave model icons still; newly detected models appear after
-the models already shown, with their own entrance animation.
-There is no quota percentage, and a loaded model does not produce a working indicator. Switching
-monitoring off leaves Ollama running and removes the reading; model readings
-are not saved across launches. Monitoring never initiates inference.
+**Ollama is opt-in:** enable **Monitor Ollama** in **Settings → Ollama**.
+Each loaded model gets a notch cell; reorder or hide it in **Settings → Accounts**.
+Hover for RAM, context limit and quantization.
 
-
-Enabling Ollama monitoring also starts the local relay. For speed measurements
-and a live **Thinking** indicator, point your Ollama client at
-`http://127.0.0.1:11435` while Codenotch is open. The backend stays on `11434`.
-Settings → Ollama shows whether this connection is listening or unavailable,
-whether it has received generation speed, and the Terminal command to use it.
-Ordinary `ollama` commands using `11434` are detected but cannot supply speed
-or thinking to Codenotch. Closing Codenotch also closes `11435`.
-For example:
+For generation speed (**tok/s**) and live **Thinking**, keep Codenotch open
+and connect through its local relay:
 
 ```sh
 OLLAMA_HOST=http://127.0.0.1:11435 ollama run gemma4:e4b --think
 ```
 
-The existing white arc spins only while that model emits streamed reasoning,
-and stops when answer text starts or the request ends/cancels. Native Ollama
-`/api/chat`, `/api/generate`, and OpenAI-compatible `/v1/chat/completions` streams
-are observed. Direct backend requests and non-streaming responses cannot show
-live thinking. Completed native `/api/chat` and `/api/generate` responses,
-streamed or not, update speed from `eval_count / (eval_duration / 1e9)`.
-This is the latest response's average generation speed, excluding model loading
-and prompt processing; OpenAI-compatible responses lack the required timing.
-The full outer ring is blue at ≥40 tok/s, green at 20–<40, yellow at 10–<20,
-red below 10, and gray before measurement. These are display thresholds, not a
-PC health rating. The white thinking arc remains independent of the speed color.
-
-The relay keeps active request/model identifiers and timestamps, plus the latest
-speed measurement per model (up to 128 models), only in memory. It does not save
-prompts, reasoning, or replies. It binds to loopback only and
-forwards requests to your configured local Ollama server (32 MiB request limit).
-Disabling monitoring closes the relay's connections and clears activity
-and speed measurements. Changing the backend or relaunching also clears them.
+Speed updates after completed native Ollama responses; thinking requires streamed
+reasoning. Direct requests to Ollama's default port (`11434`) only provide model
+detection. Monitoring never initiates inference or saves prompts, reasoning or replies.
+See [Ollama details](docs/plans/2026-09-07-local-llm-provider-plan.md).
 
 Settings lists the connected providers in the order the notch draws them, and
 you can drag one by its handle to move it. The order is remembered across
