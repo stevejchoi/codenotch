@@ -168,6 +168,36 @@ final class ProviderDisconnectionTests: XCTestCase {
         XCTAssertTrue(store.refreshing.isEmpty)
     }
 
+    func testStoppingBeforeTheScheduledRefreshRunsPreventsFetches() async {
+        let provider = Probe(id: "a")
+        let (store, archive) = makeStore([provider])
+        store.refreshNow()
+        store.stop()
+        await waitForResponseProcessing()
+
+        XCTAssertEqual(provider.calls, 0)
+        XCTAssertFalse(store.snapshots.contains { $0.hasReading })
+        XCTAssertNil(archive.load()[provider.id])
+        XCTAssertTrue(store.refreshing.isEmpty)
+
+        await store.refresh()
+        XCTAssertEqual(provider.calls, 1)
+        XCTAssertNotNil(archive.load()[provider.id])
+    }
+
+    func testCancelledRefreshTaskDoesNotStartProviderFetches() async {
+        let provider = Probe(id: "a")
+        let (store, archive) = makeStore([provider])
+        let refresh = Task { await store.refresh() }
+        refresh.cancel()
+        await refresh.value
+
+        XCTAssertEqual(provider.calls, 0)
+        XCTAssertFalse(store.snapshots.contains { $0.hasReading })
+        XCTAssertNil(archive.load()[provider.id])
+        XCTAssertTrue(store.refreshing.isEmpty)
+    }
+
     private func finish(_ provider: Probe, in store: UsageStore,
                         error: UsageProviderError? = nil) async {
         let finished = expectation(description: "Refresh finished")

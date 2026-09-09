@@ -413,7 +413,7 @@ final class StrayClickPinTests: XCTestCase {
         XCTAssertFalse(controller.model.isExpanded)
         XCTAssertFalse(controller.model.isPinned)
 
-        controller.handleClick()
+        controller.handleClick(at: .zero)
 
         XCTAssertTrue(controller.model.isExpanded, "the click did not open it at all")
         XCTAssertFalse(controller.model.isPinned, "a click before it ever opened pinned it")
@@ -423,7 +423,7 @@ final class StrayClickPinTests: XCTestCase {
     /// pill's hot zone is large enough that more than one could land.
     func testRepeatedClicksBeforeOpeningNeverPin() {
         let controller = NotchWindowController()
-        for _ in 0..<3 { controller.handleClick() }
+        for _ in 0..<3 { controller.handleClick(at: .zero) }
         XCTAssertFalse(controller.model.isPinned)
         XCTAssertTrue(controller.model.isExpanded)
     }

@@ -229,6 +229,8 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
+        // The provider tasks below do not inherit this task's cancellation.
+        guard !Task.isCancelled else { return }
         let tasks = orderedProviders.filter { !disconnected.contains($0.id) }.map {
             beginRefresh($0)
         }
@@ -240,12 +242,13 @@ final class UsageStore: ObservableObject {
     /// Deliberately not routed through `refreshNow`: asking one cell for a fresh
     /// reading should not spend every other provider's rate-limit budget, and
     /// Claude's in particular is easy to exhaust.
-    func refresh(providerID: String) {
+    @discardableResult
+    func refresh(providerID: String) -> Task<Void, Never>? {
         guard let provider = providers.first(where: { $0.id == providerID }),
-              !disconnected.contains(providerID),
-              !refreshing.contains(providerID) else { return }
+              !disconnected.contains(providerID) else { return nil }
+        if let task = fetchTasks[providerID] { return task }
         if provider.kind == .usage { lastAttempt = Date() }
-        _ = beginRefresh(provider, holdIndicator: true)
+        return beginRefresh(provider, holdIndicator: true)
     }
 
     func refreshLocalRuntimes() {
@@ -258,7 +261,7 @@ final class UsageStore: ObservableObject {
         guard let provider = providers.first(where: { $0.id == "ollama" }) as? OllamaProvider,
               provider.endpoint != endpoint else { return }
         cancelRefresh(providerID: provider.id)
-        provider.updateEndpoint(endpoint)
+        provider.endpoint = endpoint
         guard !disconnected.contains(provider.id) else { return }
         publish(Self.placeholder(provider))
         _ = beginRefresh(provider)

@@ -8,10 +8,19 @@ final class NotchViewModel: ObservableObject {
 
     func updateSnapshots(_ providerSnapshots: [ProviderSnapshot]) {
         let hoveredID = hoveredSnapshot?.id
-        let next = providerSnapshots.flatMap(\.notchSnapshots).map(withPerformance)
-        if snapshots.map(\.id) != next.map(\.id) { hoveredIndex = nil }
+        let next = providerSnapshots.flatMap { provider in
+            let cells = provider.notchSnapshots
+            guard provider.kind == .localRuntime else { return cells }
+            // Inventory is sorted by name. Append newly loaded models instead
+            // of making the existing icons trade places on every discovery.
+            let byID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0) })
+            let retained = snapshots.filter { $0.providerID == provider.id }.compactMap { byID[$0.id] }
+            let retainedIDs = Set(retained.map(\.id))
+            return retained + cells.filter { !retainedIDs.contains($0.id) }
+        }.map(withPerformance)
+        let nextHoveredIndex = hoveredID.flatMap { id in next.firstIndex { $0.id == id } }
+        if hoveredIndex != nextHoveredIndex { hoveredIndex = nextHoveredIndex }
         snapshots = next
-        if let hoveredID { hoveredIndex = next.firstIndex { $0.id == hoveredID } }
     }
 
     func updatePerformances(_ measurements: [String: LocalModelPerformance]) {
@@ -58,6 +67,27 @@ final class NotchViewModel: ObservableObject {
     var staysOpen: Bool { isPinned || isAlwaysOn }
     /// Providers with a fetch in flight, driven by the store.
     @Published var refreshing: Set<String> = []
+    @Published private(set) var refreshingCells: Set<String> = []
+
+    func isRefreshing(_ snapshot: ProviderSnapshot) -> Bool {
+        snapshot.localModel == nil
+            ? refreshing.contains(snapshot.providerID)
+            : refreshingCells.contains(snapshot.id)
+    }
+
+    func refresh(_ snapshot: ProviderSnapshot, using refreshProvider: (String) async -> Void) async {
+        guard snapshot.localModel != nil else {
+            await refreshProvider(snapshot.providerID)
+            return
+        }
+        guard refreshingCells.insert(snapshot.id).inserted else { return }
+        defer { refreshingCells.remove(snapshot.id) }
+        // A shared inventory fetch is not activity in every loaded model.
+        // Only the clicked cell presses in, even when it joins an existing poll.
+        async let feedback: Void = Task.sleep(nanoseconds: 380_000_000)
+        await refreshProvider(snapshot.providerID)
+        _ = try? await feedback
+    }
     /// The settings handle is under the cursor.
     @Published var isHoveringSettings = false
     /// A direct SwiftUI tap on the settings orb, independent of the panel's

@@ -50,18 +50,22 @@ cell showing its last measured generation speed, such as **30 tok/s**, or
 **— tok/s** until measured. Qwen, Gemma, Llama (Meta), DeepSeek
 and Mistral models get their brand icon automatically from the model name;
 unrecognized or custom names use the Ollama llama icon. Hover for the model name,
-last speed, speed band, measurement age, RAM and **Context limit** in tokens;
+last speed, speed band, measurement age, RAM, **Quantization** (such as `Q4_K_M`
+or `Q8_0`) and **Context limit** in tokens;
 this limit is not actual token consumption. A cell
 disappears when its model unloads. Connection status stays in Settings.
+Clicking a model animates only that cell while refreshing the shared inventory.
+Background polls leave model icons still; newly detected models appear after
+the models already shown, with their own entrance animation.
 There is no quota percentage, and a loaded model does not produce a working indicator. Switching
 monitoring off leaves Ollama running and removes the reading; model readings
 are not saved across launches. Monitoring never initiates inference.
 
 
-For speed measurements and a live **Thinking** indicator, enable
-**Track speed and thinking through local relay**
-in the same settings. Point your Ollama client at `http://127.0.0.1:11435` while
-Codenotch is open. The backend stays on `11434`. For example:
+Enabling Ollama monitoring also starts the local relay. For speed measurements
+and a live **Thinking** indicator, point your Ollama client at
+`http://127.0.0.1:11435` while Codenotch is open. The backend stays on `11434`.
+For example:
 
 ```sh
 OLLAMA_HOST=http://127.0.0.1:11435 ollama run gemma4:e4b --think
@@ -83,7 +87,7 @@ The relay keeps active request/model identifiers and timestamps, plus the latest
 speed measurement per model (up to 128 models), only in memory. It does not save
 prompts, reasoning, or replies. It binds to loopback only and
 forwards requests to your configured local Ollama server (32 MiB request limit).
-Disabling monitoring or the relay closes its connections and clears activity
+Disabling monitoring closes the relay's connections and clears activity
 and speed measurements. Changing the backend or relaunching also clears them.
 
 Settings lists the connected providers in the order the notch draws them, and

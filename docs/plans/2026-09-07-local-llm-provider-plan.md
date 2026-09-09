@@ -2,8 +2,9 @@
 
 Prepared 2026-09-07 against `60bafc292d087938edee278f6f9b5e491560bbe6`.
 Status: Ollama monitoring, one speed cell per loaded model, automatic brand icons,
-and an opt-in local relay for thinking and generation speed are implemented in
-the working tree. Other runtimes and cumulative token totals remain future work.
+and a local relay for thinking and generation speed are implemented in the
+working tree. The relay follows the Ollama monitoring switch, which defaults
+off. Other runtimes and cumulative token totals remain future work.
 
 ## Local smoke verification
 
@@ -175,9 +176,9 @@ Proposed minimal additions (names may be refined during implementation):
   local runtimes, declared as a `UsageProvider` requirement with a default for
   existing adapters. Carry it into summaries and placeholders so a local server
   is recognizable before any successful fetch.
-- An optional typed `LocalRuntimeReading` on `ProviderSnapshot`, containing
-  `observedAt` and a list of models with stable IDs, names, and optional reported
-  memory/context fields. An empty model list is still a valid reading.
+- An optional typed `LocalRuntimeReading` on `ProviderSnapshot`, containing a
+  list of models with names as stable IDs and optional reported memory, context,
+  and quantization fields. An empty model list is still a valid reading.
 - Extend `hasReading`, headline display, tooltip content, and accessibility for
   this payload; leave `LimitWindow` semantics intact. Use `.official` for fields
   reported by the runtime. Label later calculated metrics separately.
@@ -344,9 +345,11 @@ followed by Xcode's `Platforms/MacOSX.platform/Developer/Library/Frameworks`
 The user explicitly chose a local relay to observe actual reasoning, rather than
 infer it from loaded models. `OllamaActivityRelay` owns a loopback listener at
 `127.0.0.1:11435`; the configured Ollama server remains the upstream (`11434`
-here). `ollamaThinkingRelayEnabled` defaults off and was enabled on this Mac
-with the user's approval. The settings menu now opens the actual Settings
-window rather than SwiftUI's empty placeholder scene.
+here). The initial separate relay switch was enabled on this Mac with the
+user's approval. On 2026-09-08, that switch and its stored preference were
+removed at the user's request; the relay now follows the Ollama monitoring
+switch. The settings menu opens the actual Settings window rather than
+SwiftUI's empty placeholder scene.
 
 Request path: client → SwiftNIO HTTP relay → configured loopback Ollama →
 NDJSON/SSE observer → active request ledger → `thinkingModels` →
@@ -430,10 +433,19 @@ is retained, and monitoring does not initiate generation.
 The full outer ring is blue at ≥40 tok/s, green at 20–<40, yellow at 10–<20,
 red below 10, and gray before measurement. These are UI speed thresholds and
 do not diagnose hardware health. The inner white reasoning arc is independent.
-The tooltip has five rows: last speed, textual speed band, RAM, context limit
-and measurement age. Shared tooltip height/hit geometry was updated together,
+The tooltip has six rows: last speed, textual speed band, RAM, context limit,
+quantization and measurement age. Quantization was subsequently added from
+`/api/ps` model `details.quantization_level` (for example `Q4_K_M` or `Q8_0`).
+Missing or blank metadata displays `Unavailable`; the model tag is not used to
+guess it. Shared tooltip height/hit geometry was updated together,
 and accessibility includes speed and its text meaning. Settings explains the
 relay address, measurements and colors.
+
+The quantization follow-up passed 601 tests with the opt-in live test skipped.
+Four-edge tooltip renders include `Q4_K_M`, `Q8_0` and missing metadata. In the
+running app, the five loaded demonstration models retained separate speed cells;
+Llama 3.2 1B displayed `Q8_0`, while Qwen3 0.6B, DeepSeek-R1 1.5B, Ministral 3
+3B and Gemma 4 E4B displayed `Q4_K_M`, matching their live `/api/ps` metadata.
 
 Verification: 595 tests completed with 594 passed, one opt-in live listing test
 skipped and no failures. New coverage includes exact thresholds, official
@@ -459,3 +471,28 @@ verification started from an empty `/api/ps` list. Its Qwen model was unloaded
 after checking its expiry had not changed through user activity. The final
 runtime list was empty. The updated app, Ollama server and opt-in relay remain
 running, with the user's current right-edge/hover/menu-bar choices preserved.
+
+### Independent local model animations
+
+Local cells previously used the shared `ollama` refresh flag, so clicking one
+model or discovering another pressed every loaded model's ring. Click feedback
+now belongs to the unique cell ID and awaits the shared inventory request;
+background polls do not press local rings. Repeated clicks on one cell coalesce,
+while another cell can show its own feedback. Existing local cells retain their
+order and newly detected cells append with their own entrance transition.
+Snapshot updates no longer wrap the entire list in an unfolding animation.
+Panel click handling uses the event's location instead of the later global
+cursor position. The bar retains its existing centering and sizing behavior.
+
+The full suite completed 606 tests: 605 passed, one opt-in live listing test was
+skipped, and none failed. Coverage includes concurrent cell feedback, joining
+an in-flight inventory poll, model insertion/removal order, hover identity, and
+panel-event routing to the selected model on all four edges. Native four-edge
+renders were inspected. In the running right-edge sidebar, Qwen, Llama and
+DeepSeek were verified with real local readings. A 60 fps recording shows each
+clicked ring shrinking independently to 80 pixels while both neighboring rings
+remain 88 pixels wide throughout that click. A separate capture confirms a
+new model's entrance without reordering or pressing existing model rings.
+Evidence is under `build/independent-animation`; the full test log is
+`build/ollama-independent-tests-rerun.log`. The rebuilt app is running and
+the original `Show on hover` preference was restored after recording.

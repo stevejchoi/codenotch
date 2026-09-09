@@ -31,7 +31,8 @@ final class PreferencesMigrationTests: XCTestCase {
         Preferences.migrateFromPreviousName(into: fresh, from: oldName)
 
         let preferences = Preferences(defaults: fresh)
-        XCTAssertEqual(preferences.disconnectedProviders, ["glm"])
+        // Migrated choices survive; the local integration still starts opt-in.
+        XCTAssertEqual(preferences.disconnectedProviders, ["glm", "ollama"])
         XCTAssertEqual(preferences.notchVisibility, .alwaysShow)
     }
 

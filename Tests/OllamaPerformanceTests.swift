@@ -177,7 +177,9 @@ final class OllamaPerformanceViewTests: XCTestCase {
 
     private func runtime(names: [String]) throws -> ProviderSnapshot {
         let data = try JSONSerialization.data(withJSONObject: ["models": names.map {
-            ["name": $0, "size": 4_831_838_208, "context_length": 2048] as [String: Any]
+            ["name": $0, "size": 4_831_838_208, "context_length": 2048,
+             "details": $0.hasPrefix("qwen") ? [:]
+                : ["quantization_level": $0.hasPrefix("llama") ? "Q8_0" : "Q4_K_M"]] as [String: Any]
         }])
         return ProviderSnapshot(id: "ollama", displayName: "Ollama", glyph: .ollama, fidelity: .official,
             status: .ok, windows: [], kind: .localRuntime, localRuntime: try OllamaUsage.parse(data))

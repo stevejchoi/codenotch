@@ -20,10 +20,6 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(ollamaEndpoint, forKey: Keys.ollamaEndpoint) }
     }
 
-    @Published var ollamaThinkingRelayEnabled: Bool {
-        didSet { defaults.set(ollamaThinkingRelayEnabled, forKey: "ollamaThinkingRelayEnabled") }
-    }
-
     /// Providers whose threshold alerts are muted. Stored as the muted set so
     /// a provider added later alerts by default — the same reasoning as
     /// `disconnectedProviders`.
@@ -267,7 +263,6 @@ final class Preferences: ObservableObject {
             defaults.set(Array(disconnected), forKey: Keys.disconnected)
             defaults.set(true, forKey: Keys.introducedOllama)
         }
-        self.ollamaThinkingRelayEnabled = defaults.bool(forKey: "ollamaThinkingRelayEnabled")
         self.disconnectedProviders = disconnected
         self.ollamaEndpoint = (try? OllamaEndpoint.parse(
             defaults.string(forKey: Keys.ollamaEndpoint) ?? OllamaEndpoint.defaultAddress

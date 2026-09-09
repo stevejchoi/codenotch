@@ -362,6 +362,7 @@ private struct RuntimeModelDetails: View {
                 SplitRow(leading: "Speed band", trailing: performance?.band.label ?? "—")
                 SplitRow(leading: "RAM", trailing: model.memoryBytes == nil ? "Unavailable" : model.memoryText)
                 SplitRow(leading: "Context limit", trailing: model.contextText)
+                SplitRow(leading: "Quantization", trailing: model.quantizationText)
                 SplitRow(leading: "Measured", trailing: performance.map { ElapsedCopy.ago(since: $0.measuredAt, now: now) } ?? "—")
             }
             .padding(.top, NotchLayout.blockSpacing)

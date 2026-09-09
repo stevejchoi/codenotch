@@ -140,7 +140,7 @@ private final class RelayRequestHandler: ChannelInboundHandler {
                     var headers = relayHeaders(head.headers)
                     headers.remove(name: "host")
                     headers.remove(name: "expect")
-                    headers.replaceOrAdd(name: "host", value: upstream.authorityForRelay)
+                    headers.replaceOrAdd(name: "host", value: "\(upstream.host ?? "127.0.0.1"):\(upstream.port ?? 80)")
                     headers.replaceOrAdd(name: "content-length", value: String(body.count))
                     headers.replaceOrAdd(name: "accept-encoding", value: "identity")
                     headers.replaceOrAdd(name: "connection", value: "close")
@@ -244,12 +244,5 @@ private final class RelayResponseHandler: ChannelInboundHandler {
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         owner?.upstreamFailed()
         context.close(promise: nil)
-    }
-}
-
-private extension URL {
-    var authorityForRelay: String {
-        let host = self.host ?? "127.0.0.1"
-        return host + ":" + String(port ?? 80)
     }
 }

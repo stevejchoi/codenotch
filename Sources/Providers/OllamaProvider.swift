@@ -7,16 +7,12 @@ final class OllamaProvider: UsageProvider {
     nonisolated let glyph = ProviderGlyph.ollama
     nonisolated let kind = ProviderKind.localRuntime
 
-    private(set) var endpoint: URL
+    var endpoint: URL
     private let session: URLSession
 
     init(endpoint: URL, session: URLSession? = nil) {
         self.endpoint = endpoint
         self.session = session ?? Self.makeSession()
-    }
-
-    func updateEndpoint(_ endpoint: URL) {
-        self.endpoint = endpoint
     }
 
     func fetchSnapshot() async throws -> ProviderSnapshot {
@@ -28,10 +24,9 @@ final class OllamaProvider: UsageProvider {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
-        } catch is CancellationError {
+        } catch where error is CancellationError || (error as? URLError)?.code == .cancelled {
             throw CancellationError()
         } catch {
-            if (error as? URLError)?.code == .cancelled { throw CancellationError() }
             throw OllamaError.unavailable
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0

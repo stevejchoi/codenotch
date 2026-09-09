@@ -13,16 +13,36 @@ final class OllamaUsageTests: XCTestCase {
     }
 
     func testPreservesReportedUnitsAndMissingFields() throws {
-        let data = Data(#"{"models":[{"name":"z-model","size":6442450944,"size_vram":4294967296,"context_length":32768},{"name":"a-model"}]}"#.utf8)
+        let data = Data(#"{"models":[{"name":"z-model","size":6442450944,"size_vram":4294967296,"context_length":32768,"details":{"quantization_level":"Q4_K_M"}},{"name":"a-model"}]}"#.utf8)
         let reading = try OllamaUsage.parse(data)
         XCTAssertEqual(reading.models.map(\.name), ["a-model", "z-model"])
+        XCTAssertEqual(ollamaSnapshot(reading).notchSnapshots.map(\.id),
+                       ["ollama:model:a-model", "ollama:model:z-model"])
         XCTAssertNil(reading.models[0].memoryBytes)
         XCTAssertNil(reading.models[0].contextLength)
+        XCTAssertNil(reading.models[0].quantizationLevel)
+        XCTAssertEqual(reading.models[0].quantizationText, "Unavailable")
         XCTAssertEqual(reading.models[1].memoryBytes, 6_442_450_944)
-        XCTAssertEqual(reading.models[1].gpuMemoryBytes, 4_294_967_296)
         XCTAssertEqual(reading.models[1].contextLength, 32_768)
+        XCTAssertEqual(reading.models[1].quantizationLevel, "Q4_K_M")
         XCTAssertNil(ollamaSnapshot(reading).usedFraction)
         XCTAssertTrue(ollamaSnapshot(reading).windows.isEmpty)
+    }
+
+    func testQuantizationUsesReportedMetadataInsteadOfTheModelTag() throws {
+        for (details, expected) in [
+            (#"{"quantization_level":"Q8_0"}"#, "Q8_0"),
+            (#"{"quantization_level":" IQ4_XS "}"#, "IQ4_XS"),
+            (#"{"quantization_level":"F16"}"#, "F16"),
+            (#"{"quantization_level":"  "}"#, "Unavailable"),
+            (#"{"quantization_level":null}"#, "Unavailable"),
+            ("{}", "Unavailable"), ("null", "Unavailable")
+        ] {
+            let data = Data("{\"models\":[{\"name\":\"custom:Q4_K_M\",\"details\":\(details)}]}".utf8)
+            let cell = try XCTUnwrap(ollamaSnapshot(OllamaUsage.parse(data)).notchSnapshots.first)
+            XCTAssertEqual(cell.localModel?.quantizationText, expected, details)
+            XCTAssertTrue(cell.localModel?.detail.contains("Quantization \(expected)") == true)
+        }
     }
 
     func testMalformedListingsAreNotEmptySuccesses() {
@@ -84,6 +104,149 @@ final class OllamaModelCellTests: XCTestCase {
         XCTAssertNil(model.hoveredIndex)
         try update([])
         XCTAssertTrue(model.snapshots.isEmpty)
+    }
+
+    func testDiscoveryAppendsModelsWithoutReorderingExistingCellsOrTheirHover() throws {
+        let model = NotchViewModel()
+        let cloud = Fixtures.snapshots()[0]
+        func update(_ names: [String], size: Int) throws {
+            let data = try JSONSerialization.data(withJSONObject: ["models": names.map {
+                ["name": $0, "size": size] as [String: Any]
+            }])
+            model.updateSnapshots([cloud, ollamaSnapshot(try OllamaUsage.parse(data))])
+        }
+        try update(["qwen3:8b", "llama3.1:8b"], size: 100)
+        model.hoveredIndex = 2
+        let hoveredID = model.hoveredSnapshot?.id
+        try update(["deepseek-r1:1.5b", "qwen3:8b", "llama3.1:8b"], size: 200)
+        XCTAssertEqual(model.snapshots.dropFirst().compactMap { $0.localModel?.name },
+                       ["llama3.1:8b", "qwen3:8b", "deepseek-r1:1.5b"])
+        XCTAssertEqual(model.hoveredIndex, 2)
+        XCTAssertEqual(model.hoveredSnapshot?.id, hoveredID)
+        XCTAssertEqual(model.hoveredSnapshot?.localModel?.memoryBytes, 200)
+        XCTAssertEqual(model.snapshots[0], cloud)
+        try update(["deepseek-r1:1.5b", "qwen3:8b"], size: 300)
+        XCTAssertEqual(model.snapshots.dropFirst().compactMap { $0.localModel?.name },
+                       ["qwen3:8b", "deepseek-r1:1.5b"])
+        XCTAssertEqual(model.hoveredSnapshot?.id, hoveredID)
+        try update(["llama3.1:8b", "qwen3:8b", "deepseek-r1:1.5b"], size: 400)
+        XCTAssertEqual(model.snapshots.dropFirst().compactMap { $0.localModel?.name },
+                       ["qwen3:8b", "deepseek-r1:1.5b", "llama3.1:8b"])
+    }
+
+    func testLocalClickFeedbackIsIndependentFromPollingAndOtherModelClicks() async throws {
+        let model = NotchViewModel()
+        model.updateSnapshots([Fixtures.snapshots()[0], ollamaSnapshot(try OllamaUsage.parse(
+            Data(#"{"models":[{"name":"llama3.1:8b"},{"name":"qwen3:8b"}]}"#.utf8)))])
+        let cloud = model.snapshots[0], first = model.snapshots[1], second = model.snapshots[2]
+        model.refreshing = ["ollama", cloud.providerID]
+        XCTAssertTrue(model.isRefreshing(cloud))
+        XCTAssertFalse(model.isRefreshing(first), "Inventory polling must not press model icons")
+        XCTAssertFalse(model.isRefreshing(second))
+        var releases: [CheckedContinuation<Void, Never>] = []
+        var requests: [String] = []
+        let refresh: (String) async -> Void = { id in
+            requests.append(id)
+            await withCheckedContinuation { releases.append($0) }
+        }
+        let firstClick = Task { await model.refresh(first, using: refresh) }
+        for _ in 0..<100 where releases.isEmpty { await Task.yield() }
+        XCTAssertTrue(model.isRefreshing(first))
+        XCTAssertFalse(model.isRefreshing(second))
+        await model.refresh(first, using: refresh)
+        XCTAssertEqual(requests, ["ollama"], "Repeated clicks must not start another refresh")
+        let secondClick = Task { await model.refresh(second, using: refresh) }
+        for _ in 0..<100 where releases.count < 2 { await Task.yield() }
+        model.refreshing = []
+        XCTAssertTrue(model.isRefreshing(first))
+        XCTAssertTrue(model.isRefreshing(second))
+        XCTAssertFalse(model.isRefreshing(cloud))
+        guard releases.count == 2 else {
+            releases.forEach { $0.resume() }
+            firstClick.cancel(); secondClick.cancel()
+            return XCTFail("Both model refreshes must start")
+        }
+        releases[0].resume()
+        await firstClick.value
+        XCTAssertFalse(model.isRefreshing(first))
+        XCTAssertTrue(model.isRefreshing(second), "Finishing one model must not release the other")
+        releases[1].resume()
+        await secondClick.value
+        XCTAssertTrue(model.refreshingCells.isEmpty)
+    }
+
+    func testPanelClickUsesTheEventLocationAndAnimatesOnlyThatModelOnEveryEdge() async throws {
+        let runtime = ollamaSnapshot(try OllamaUsage.parse(
+            Data(#"{"models":[{"name":"llama3.1:8b"},{"name":"qwen3:8b"}]}"#.utf8)))
+        for edge in NotchEdge.allCases {
+            let controller = NotchWindowController()
+            controller.model.updateSnapshots([Fixtures.snapshots()[0], runtime])
+            controller.model.edge = edge
+            controller.model.isExpanded = true
+            controller.relocate()
+            defer { controller.stop() }
+            let panel = try XCTUnwrap(controller.panelContentViewForTesting?.window as? NotchPanel)
+            panel.contentView?.layoutSubtreeIfNeeded()
+            let model = controller.model
+            let point = NotchPlacement(edge: edge, panelSize: panel.frame.size).point(
+                along: model.slack + model.ringCenter(index: 1),
+                across: model.contentInset + NotchLayout.bodyDepth(for: edge) / 2)
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown,
+                location: CGPoint(x: point.x, y: panel.frame.height - point.y),
+                modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            var requestedIDs: [String] = []
+            controller.onRefreshProvider = { requestedIDs.append($0) }
+            panel.mouseDown(with: event)
+            for _ in 0..<100 where requestedIDs.isEmpty { await Task.yield() }
+            XCTAssertEqual(requestedIDs, ["ollama"], edge.rawValue)
+            XCTAssertTrue(model.isRefreshing(model.snapshots[1]), edge.rawValue)
+            XCTAssertFalse(model.isRefreshing(model.snapshots[2]), edge.rawValue)
+            XCTAssertFalse(model.isRefreshing(model.snapshots[0]), edge.rawValue)
+        }
+    }
+
+    func testFleetProjectsLocalModelsAndSharesCachedActivityWithNewDisplays() throws {
+        guard !NSScreen.screens.isEmpty else { throw XCTSkip("Requires a display") }
+        let runtime = ollamaSnapshot(try OllamaUsage.parse(
+            Data(#"{"models":[{"name":"llama3.1:8b"},{"name":"qwen3:8b"}]}"#.utf8)))
+        let cloud = Fixtures.snapshots()[0]
+        let key = OllamaThinkingStream.modelKey("qwen3:8b")
+        let measurement = try XCTUnwrap(LocalModelPerformance(
+            outputTokens: 30, durationNanoseconds: 1_000_000_000))
+        let fleet = NotchFleet(scope: .allDisplays, edge: .right)
+        fleet.setSnapshots([cloud, runtime])
+        fleet.setThinkingModels([key: Date()])
+        fleet.setPerformances([key: measurement])
+        fleet.onRefreshProvider = { _ in }
+        fleet.show()
+        defer { fleet.stop() }
+
+        XCTAssertEqual(fleet.controllersForTesting.count, NSScreen.screens.count)
+        for controller in fleet.controllersForTesting {
+            let model = controller.model
+            XCTAssertEqual(model.snapshots.map(\.id),
+                           [cloud.id, "ollama:model:llama3.1:8b", "ollama:model:qwen3:8b"])
+            XCTAssertNil(model.snapshots[1].localPerformance)
+            XCTAssertEqual(model.snapshots[2].localPerformance, measurement)
+            XCTAssertNil(model.activity(for: model.snapshots[1]))
+            XCTAssertEqual(model.activity(for: model.snapshots[2])?.state, .working)
+            XCTAssertNotNil(controller.onRefreshProvider)
+        }
+
+        // Provider ordering still applies while one provider expands to many cells.
+        fleet.setSnapshots([runtime, cloud])
+        fleet.setThinkingModels([:])
+        fleet.setPerformances([:])
+        for controller in fleet.controllersForTesting {
+            XCTAssertEqual(controller.model.snapshots.map(\.providerID), ["ollama", "ollama", cloud.id])
+            XCTAssertTrue(controller.model.snapshots.allSatisfy { $0.localPerformance == nil })
+            XCTAssertTrue(controller.model.thinkingModels.isEmpty)
+        }
+        fleet.setSnapshots([cloud])
+        for controller in fleet.controllersForTesting {
+            XCTAssertEqual(controller.model.snapshots, [cloud])
+        }
     }
 
     func testUnavailableRuntimeDoesNotLeavePhantomModelCells() {
@@ -211,6 +374,17 @@ final class OllamaProviderTests: XCTestCase {
         }
     }
 
+    func testCancelledRequestStaysCancellation() async {
+        let provider = makeProvider { _ in throw URLError(.cancelled) }
+        do {
+            _ = try await provider.fetchSnapshot()
+            XCTFail("Cancelled request succeeded")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Cancellation became \(error)")
+        }
+    }
+
     func testSessionDoesNotStoreCredentialsOrFollowRedirects() {
         let session = OllamaProvider.makeSession()
         defer { session.invalidateAndCancel() }
@@ -319,6 +493,24 @@ final class OllamaLifecycleTests: XCTestCase {
         XCTAssertTrue(store.snapshots[0].hasReading)
     }
 
+    func testClickedModelCanAwaitTheExistingInventoryPoll() async throws {
+        let provider = RuntimeStub()
+        provider.suspended = true
+        let store = UsageStore(providers: [provider], archive: UsageArchive(defaults: isolatedDefaults()))
+        store.refreshLocalRuntimes()
+        await started(provider)
+        let pending = try XCTUnwrap(store.refresh(providerID: "ollama"))
+        var completed = false
+        let waiting = Task { await pending.value; completed = true }
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertFalse(completed, "Joining a poll must await its actual completion")
+        XCTAssertEqual(provider.calls, 1)
+        provider.finish()
+        await waiting.value
+        XCTAssertTrue(completed)
+        XCTAssertFalse(store.refreshing.contains("ollama"))
+    }
+
     func testReconnectingIgnoresThePreviousConnectionResponse() async {
         let provider = RuntimeStub()
         provider.suspended = true
@@ -423,7 +615,7 @@ private final class RuntimeStub: UsageProvider {
         if fails { throw OllamaError.unavailable }
         return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                 fidelity: .official, status: .ok, windows: [],
-                                kind: kind, localRuntime: LocalRuntimeReading(models: [], observedAt: Date()))
+                                kind: kind, localRuntime: LocalRuntimeReading(models: []))
     }
     func finish() {
         guard !continuations.isEmpty else { return }
@@ -455,10 +647,11 @@ private func ollamaSnapshot(_ reading: LocalRuntimeReading) -> ProviderSnapshot 
 final class OllamaRenderTests: XCTestCase {
     func testLocalCardsFitTheExistingPanelBudgetOnEveryEdge() throws {
         let models = (0..<8).map { index in
-            LocalRuntimeReading.Model(id: "m\(index)", name: "example/long-model-name-\(index):latest",
-                memoryBytes: 6_442_450_944, gpuMemoryBytes: nil, contextLength: 32_768)
+            LocalRuntimeReading.Model(name: "example/long-model-name-\(index):latest",
+                memoryBytes: 6_442_450_944, contextLength: 32_768,
+                quantizationLevel: index.isMultiple(of: 2) ? "Q4_K_M" : "Q8_0")
         }
-        let snapshots = ollamaSnapshot(LocalRuntimeReading(models: models, observedAt: Date())).notchSnapshots
+        let snapshots = ollamaSnapshot(LocalRuntimeReading(models: models)).notchSnapshots
         XCTAssertEqual(snapshots.count, models.count)
         for (index, snapshot) in snapshots.enumerated() {
             let height = NotchLayout.cardHeight(windowCount: 0, localModelName: snapshot.localModel?.name)
@@ -508,7 +701,7 @@ final class OllamaRenderTests: XCTestCase {
             preferences.setConnected(enabled, for: "ollama")
             store.disconnected = preferences.disconnectedProviders
             if enabled { await store.refresh() }
-            let content = OllamaSettingsRow(preferences: preferences, store: store)
+            let content = OllamaSettingsRow(preferences: preferences, store: store, relay: OllamaActivityRelay())
                 .padding(20).frame(width: 460).background(Color(nsColor: .windowBackgroundColor))
             let hosting = NSHostingView(rootView: content)
             hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
@@ -521,12 +714,12 @@ final class OllamaRenderTests: XCTestCase {
         }
         let model = NotchViewModel()
         let models = [
-            LocalRuntimeReading.Model(id: "llama3.1:8b", name: "llama3.1:8b",
-                memoryBytes: 4_831_838_208, gpuMemoryBytes: nil, contextLength: 2_048),
-            LocalRuntimeReading.Model(id: "qwen3:8b", name: "qwen3:8b",
-                memoryBytes: 6_442_450_944, gpuMemoryBytes: nil, contextLength: 8_192)
+            LocalRuntimeReading.Model(name: "llama3.1:8b",
+                memoryBytes: 4_831_838_208, contextLength: 2_048, quantizationLevel: "Q4_K_M"),
+            LocalRuntimeReading.Model(name: "qwen3:8b",
+                memoryBytes: 6_442_450_944, contextLength: 8_192, quantizationLevel: nil)
         ]
-        model.updateSnapshots([ollamaSnapshot(LocalRuntimeReading(models: models, observedAt: Date()))])
+        model.updateSnapshots([ollamaSnapshot(LocalRuntimeReading(models: models))])
         XCTAssertEqual(model.snapshots.count, 2)
         model.isExpanded = true
         model.hoveredIndex = 0
@@ -585,9 +778,9 @@ final class OllamaRenderTests: XCTestCase {
     func testBrandIconsAndRuntimeLabelsRenderTogether() throws {
         let names = ["qwen3:0.6b", "gemma3:270m", "llama3.2:1b",
                      "deepseek-r1:1.5b", "ministral-3:3b", "my-custom-model:latest"]
-        let models = names.map { LocalRuntimeReading.Model(id: $0, name: $0,
-            memoryBytes: 1_610_612_736, gpuMemoryBytes: nil, contextLength: 2_048) }
-        let runtime = ollamaSnapshot(LocalRuntimeReading(models: models, observedAt: Date()))
+        let models = names.sorted().map { LocalRuntimeReading.Model(name: $0,
+            memoryBytes: 1_610_612_736, contextLength: 2_048, quantizationLevel: "Q4_K_M") }
+        let runtime = ollamaSnapshot(LocalRuntimeReading(models: models))
         let model = NotchViewModel()
         model.updateSnapshots([runtime])
         model.isExpanded = true

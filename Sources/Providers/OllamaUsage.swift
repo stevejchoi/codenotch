@@ -3,35 +3,40 @@ import Foundation
 enum OllamaUsage {
     private struct Response: Decodable {
         struct Model: Decodable {
+            struct Details: Decodable {
+                let quantization_level: String?
+            }
+
             let name: String
             let size: Int64?
             let size_vram: Int64?
             let context_length: Int?
+            let details: Details?
         }
         let models: [Model]
     }
 
-    static func parse(_ data: Data, now: Date = Date()) throws -> LocalRuntimeReading {
-        do {
-            let response = try JSONDecoder().decode(Response.self, from: data)
-            var seen = Set<String>()
-            let models = try response.models.map { model in
-                guard !model.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      seen.insert(model.name).inserted,
-                      model.size.map({ $0 >= 0 }) ?? true,
-                      model.size_vram.map({ $0 >= 0 }) ?? true,
-                      model.context_length.map({ $0 > 0 }) ?? true else {
-                    throw OllamaError.invalidResponse
-                }
-                return LocalRuntimeReading.Model(
-                    id: model.name, name: model.name, memoryBytes: model.size,
-                    gpuMemoryBytes: model.size_vram, contextLength: model.context_length
-                )
-            }.sorted { $0.id < $1.id }
-            return LocalRuntimeReading(models: models, observedAt: now)
-        } catch {
+    static func parse(_ data: Data) throws -> LocalRuntimeReading {
+        guard let response = try? JSONDecoder().decode(Response.self, from: data) else {
             throw OllamaError.invalidResponse
         }
+        var seen = Set<String>()
+        let models = try response.models.map { model in
+            guard !model.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  seen.insert(model.name).inserted,
+                  model.size.map({ $0 >= 0 }) ?? true,
+                  model.size_vram.map({ $0 >= 0 }) ?? true,
+                  model.context_length.map({ $0 > 0 }) ?? true else {
+                throw OllamaError.invalidResponse
+            }
+            let quantization = model.details?.quantization_level?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return LocalRuntimeReading.Model(
+                name: model.name, memoryBytes: model.size, contextLength: model.context_length,
+                quantizationLevel: quantization?.isEmpty == false ? quantization : nil
+            )
+        }.sorted { $0.id < $1.id }
+        return LocalRuntimeReading(models: models)
     }
 }
 

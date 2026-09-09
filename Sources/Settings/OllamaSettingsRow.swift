@@ -44,7 +44,7 @@ struct OllamaSettingsRow: View {
             if let addressError {
                 Text(addressError).foregroundStyle(.orange)
             } else if !enabled {
-                Text("Monitoring off. Ollama keeps running; no model readings are kept.")
+                Text("Monitoring off.")
                     .foregroundStyle(.secondary)
             } else if checking {
                 Text("Checking Ollama…").foregroundStyle(.secondary)
@@ -53,12 +53,9 @@ struct OllamaSettingsRow: View {
                     .foregroundStyle(snapshot?.hasReading == true ? Color.secondary : .orange)
             }
 
-            if let relay {
-                OllamaThinkingSettings(preferences: preferences, relay: relay, enabled: enabled)
+            if enabled, let relay {
+                OllamaRelayStatus(relay: relay)
             }
-
-            Text("Loaded models get a cell showing the last measured tok/s. Hover for RAM and context limit. Model residency is checked every 15 seconds.")
-                .foregroundStyle(.tertiary)
         }
         .font(.caption)
         .fixedSize(horizontal: false, vertical: true)
@@ -80,30 +77,22 @@ struct OllamaSettingsRow: View {
     }
 }
 
-private struct OllamaThinkingSettings: View {
-    @ObservedObject var preferences: Preferences
+private struct OllamaRelayStatus: View {
     @ObservedObject var relay: OllamaActivityRelay
-    let enabled: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("Track speed and thinking through local relay", isOn: $preferences.ollamaThinkingRelayEnabled)
-                .toggleStyle(.switch).controlSize(.small).disabled(!enabled)
-            if preferences.ollamaThinkingRelayEnabled && enabled {
-                HStack {
-                    Text(relay.status).foregroundStyle(relay.ready ? Color.secondary : .orange)
-                        .textSelection(.enabled)
-                    Spacer()
-                    Button("Copy address") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(OllamaActivityRelay.address, forType: .string)
-                    }.controlSize(.small).disabled(!relay.ready)
-                }
-                Text("Speed colors: blue ≥40, green 20–40, yellow 10–20, red <10 tok/s. Generation speed is not a PC health rating.")
-                    .foregroundStyle(.secondary)
-                Text("Use this address in your chat app or OLLAMA_HOST. Keep Codenotch open. Native Ollama responses update generation speed; streamed thinking animates the ring. Prompts and replies are not saved.")
-                    .foregroundStyle(.secondary)
+            HStack {
+                Text(relay.status).foregroundStyle(relay.ready ? Color.secondary : .orange)
+                    .textSelection(.enabled)
+                Spacer()
+                Button("Copy address") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(OllamaActivityRelay.address, forType: .string)
+                }.controlSize(.small).disabled(!relay.ready)
             }
+            Text("Use the relay address in your chat app or OLLAMA_HOST.")
+                .foregroundStyle(.secondary)
         }
     }
 }

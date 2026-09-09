@@ -41,7 +41,7 @@ final class NotchFleet {
 
     /// Hooked up by the app delegate; driven by the notch's own chrome.
     var onRefresh: (() -> Void)?
-    var onRefreshProvider: ((String) -> Void)?
+    var onRefreshProvider: ((String) async -> Void)?
     var onOpenSettings: (() -> Void)?
     var signInItems: [(title: String, action: () -> Void)] = []
     /// An ⌥-drag on any one panel settled at a new offset. Persisting it is
@@ -149,9 +149,7 @@ final class NotchFleet {
         self.snapshots = snapshots
         let now = Date()
         for controller in controllers.values {
-            withAnimation(NotchMotion.unfold) {
-                controller.model.updateSnapshots(snapshots)
-            }
+            controller.model.updateSnapshots(snapshots)
             controller.model.now = now
         }
     }

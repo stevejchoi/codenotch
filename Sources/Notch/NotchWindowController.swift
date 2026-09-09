@@ -21,7 +21,7 @@ final class NotchWindowController {
     /// One "Sign in to …" item per provider that needs a browser session.
     var signInItems: [(title: String, action: () -> Void)] = []
     /// Refetch a single provider, asked for by clicking its ring.
-    var onRefreshProvider: ((String) -> Void)?
+    var onRefreshProvider: ((String) async -> Void)?
     /// Open the settings window, asked for by clicking the handle.
     var onOpenSettings: (() -> Void)?
     /// An ⌥-drag on the pill settled at a new `model.alongOffset`. The
@@ -161,7 +161,7 @@ final class NotchWindowController {
             let panel = NotchPanel(contentRect: frame)
             let hosting = NotchHostingView(rootView: NotchRootView(model: model))
             panel.contextMenuProvider = { [weak self] in self?.contextMenu() }
-            panel.onClick = { [weak self] in self?.handleClick() }
+            panel.onClick = { [weak self] point in self?.handleClick(at: point) }
             panel.onDrag = { [weak self] dx, dy in self?.dragged(dx: dx, dy: dy) }
             panel.onDragEnd = { [weak self] in
                 guard let self else { return }
@@ -467,12 +467,13 @@ final class NotchWindowController {
 
     /// A click on a ring refetches that provider; a click anywhere else on the
     /// open notch pins it. The ring is the more specific target, so it wins.
-    func handleClick() {
+    func handleClick(at locationInWindow: CGPoint) {
         guard let panel else {
             setExpanded(true)
             return
         }
-        let local = localCursor(in: panel.frame)
+        // Use the event position even if the pointer has moved since the click.
+        let local = CGPoint(x: locationInWindow.x, y: panel.frame.height - locationInWindow.y)
 
         // The handle sits inside the notch, so it has to be tested before the
         // cells — otherwise the cell band nearest the foot of the stack swallows
@@ -516,7 +517,10 @@ final class NotchWindowController {
         if notchRect.contains(local),
            let index = cellIndex(along: placement.along(of: local)),
            model.snapshots.indices.contains(index) {
-            onRefreshProvider?(model.snapshots[index].providerID)
+            if let onRefreshProvider {
+                let snapshot = model.snapshots[index]
+                Task { await model.refresh(snapshot, using: onRefreshProvider) }
+            }
             return
         }
         togglePinned()

@@ -290,7 +290,7 @@ enum NotchLayout {
 
         if let localModelName {
             height += headerToBlock + modelNameHeight(localModelName)
-                + blockSpacing + 5 * cardBodyLineHeight + 4 * sessionRowGap
+                + blockSpacing + 6 * cardBodyLineHeight + 5 * sessionRowGap
         } else if windowCount > 0 {
             let block = 2 * cardBodyLineHeight + labelToBar + barHeight + barToUsed
             height += headerToBlock

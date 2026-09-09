@@ -1,13 +1,15 @@
+// store info from ollama
+
 import Foundation
 
 struct LocalRuntimeReading: Equatable {
     struct Model: Identifiable, Equatable {
-        let id: String
         let name: String
         let memoryBytes: Int64?
-        let gpuMemoryBytes: Int64?
         let contextLength: Int?
+        let quantizationLevel: String?
 
+        var id: String { name }
         var brand: LocalModelBrand? { LocalModelBrand.detect(modelName: name) }
 
         var memoryText: String {
@@ -27,13 +29,14 @@ struct LocalRuntimeReading: Equatable {
             contextLength.map { "\($0.formatted()) tokens" } ?? "Unavailable"
         }
 
+        var quantizationText: String { quantizationLevel ?? "Unavailable" }
+
         var detail: String {
-            "RAM \(memoryBytes == nil ? "unavailable" : memoryText) · Context limit \(contextText)"
+            "RAM \(memoryBytes == nil ? "unavailable" : memoryText) · Context limit \(contextText) · Quantization \(quantizationText)"
         }
     }
 
     let models: [Model]
-    let observedAt: Date
 
     var summary: String {
         models.isEmpty ? "Server reachable · No models loaded"

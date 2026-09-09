@@ -116,7 +116,7 @@ struct NotchRootView: View {
             ProviderCell(
                 snapshot: snapshot,
                 activity: model.activity(for: snapshot),
-                isRefreshing: model.refreshing.contains(snapshot.providerID)
+                isRefreshing: model.isRefreshing(snapshot)
             )
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to
@@ -133,6 +133,10 @@ struct NotchRootView: View {
                     y: model.isExpanded ? 0 : model.edge.outward.y * Design.px(28)
                 )
                 .animation(motion(NotchMotion.stagger(index: index)), value: model.isExpanded)
+                .transition(.opacity.combined(with: .offset(
+                    x: model.edge.outward.x * Design.px(28),
+                    y: model.edge.outward.y * Design.px(28)
+                )).animation(motion(NotchMotion.unfold)))
         }
 
         Group {

@@ -49,10 +49,10 @@ struct LocalModelPerformance: Equatable {
 
     var band: Band {
         switch tokensPerSecond {
-        case 40...: return .veryFast
-        case 20..<40: return .smooth
-        case 10..<20: return .slow
-        default: return .verySlow
+        case ..<10: return .verySlow
+        case ..<20: return .slow
+        case ..<40: return .smooth
+        default:    return .veryFast
         }
     }
 

@@ -181,7 +181,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
 
     var notchSnapshots: [ProviderSnapshot] {
         guard kind == .localRuntime, localModel == nil else { return [self] }
-        return (localRuntime?.models ?? []).sorted { $0.id < $1.id }.map { model in
+        return (localRuntime?.models ?? []).map { model in
             ProviderSnapshot(id: "\(id):model:\(model.id)", displayName: displayName,
                              glyph: model.brand?.glyph ?? glyph,
                              fidelity: fidelity, status: status, windows: [],

@@ -106,12 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let relay = OllamaActivityRelay()
             self.ollamaRelay = relay
-            let relayPreferences = Publishers.CombineLatest3(
-                preferences.$ollamaThinkingRelayEnabled,
+            // A single publisher chain exceeds Swift's type-checking time limit.
+            let relayPreferences = Publishers.CombineLatest(
                 preferences.$disconnectedProviders,
                 preferences.$ollamaEndpoint)
             let relayConfiguration = relayPreferences.map { values in
-                (enabled: values.0 && !values.1.contains("ollama"), endpoint: values.2)
+                (enabled: !values.0.contains("ollama"), endpoint: values.1)
             }.eraseToAnyPublisher()
             relayConfiguration
                 .removeDuplicates { $0.enabled == $1.enabled && $0.endpoint == $1.endpoint }
@@ -123,9 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             relay.$thinkingModels
                 .receive(on: RunLoop.main)
                 .sink { [weak fleet, weak store] models in
-                    let previous = Set(fleet?.thinkingModels.keys.map { $0 } ?? [])
+                    let previous = fleet?.thinkingModels ?? [:]
                     fleet?.setThinkingModels(models)
-                    if !Set(models.keys).subtracting(previous).isEmpty { store?.refresh(providerID: "ollama") }
+                    if models.keys.contains(where: { previous[$0] == nil }) { store?.refresh(providerID: "ollama") }
                 }
                 .store(in: &cancellables)
 
@@ -282,7 +282,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .store(in: &cancellables)
             store.start()
             fleet.onRefresh = { [weak store] in store?.refreshNow() }
-            fleet.onRefreshProvider = { [weak store] id in store?.refresh(providerID: id) }
+            fleet.onRefreshProvider = { [weak store] id in
+                await store?.refresh(providerID: id)?.value
+            }
             store.$refreshing
                 .receive(on: RunLoop.main)
                 .sink { [weak fleet] ids in fleet?.setRefreshing(ids) }
